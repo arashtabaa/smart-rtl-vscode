@@ -42,15 +42,21 @@ pre,code,kbd,samp,.cm-editor,.monaco-editor{font-family:"SF Mono",Monaco,Consola
 $SMART_CSS_CORE = @'
 .smart-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important}
 .smart-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important}
-.smart-rtl:is(h1,h2,h3,h4,h5,h6,p,li,blockquote,div){width:100% !important;align-self:stretch !important;justify-self:stretch !important}
 .smart-header-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important}
 .smart-header-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important}
 button,[role="button"],svg{unicode-bidi:normal}
+/* Wrap smart-directed rendered text inside the visible area; never clip/overflow */
+.smart-rtl,.smart-ltr,.smart-header-rtl,.smart-header-ltr{box-sizing:border-box !important;max-width:100% !important;min-width:0 !important;white-space:normal !important;overflow-wrap:anywhere !important;word-break:normal !important;flex-shrink:1 !important}
+.smart-rtl{width:auto !important}
+.smart-rtl:is(p,li,blockquote,h1,h2,h3,h4,h5,h6,div,span),.smart-ltr:is(p,li,blockquote,h1,h2,h3,h4,h5,h6,div,span){max-width:100% !important;min-width:0 !important;overflow-wrap:anywhere !important;white-space:normal !important}
+.smart-rtl:is(h1,h2,h3,h4,h5,h6),.smart-ltr:is(h1,h2,h3,h4,h5,h6),.smart-header-rtl,.smart-header-ltr{width:auto !important;max-width:100% !important;min-width:0 !important}
+/* Let the nearest message/status text container shrink and wrap in flex rows */
+[class*="message"],[data-testid*="message"],[class*="thinking"],[data-testid*="thinking"],[class*="status"],[data-testid*="status"]{min-width:0 !important;max-width:100% !important}
 .composer-smart-rtl{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-rtl>p,.composer-smart-rtl>div{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr>p,.composer-smart-ltr>div{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
-pre,pre *,code,kbd,samp,.diff,.cm-editor,.monaco-editor{direction:ltr !important;text-align:left !important;unicode-bidi:normal !important}
+pre,pre *,code,kbd,samp,.diff,.cm-editor,.monaco-editor{direction:ltr !important;text-align:left !important;unicode-bidi:normal !important;white-space:pre !important;overflow-wrap:normal !important;word-break:normal !important}
 form:has(textarea),form:has([contenteditable]),form:has([role="textbox"]){direction:ltr !important}
 '@
 
@@ -118,12 +124,15 @@ $SMART_JS = @'
     target.style.setProperty("direction",dir,"important");
     target.style.setProperty("text-align",align,"important");
     target.style.setProperty("unicode-bidi","plaintext","important");
-    // Headings/titles inside flex/shrink layouts only move once they stretch.
-    if(dir==="rtl"){
-      target.style.setProperty("width","100%","important");
-      target.style.setProperty("align-self","stretch","important");
-      target.style.setProperty("justify-self","stretch","important");
-    }
+    // Wrap inside the visible area; never stretch past it (this is what fixes the
+    // RTL horizontal overflow/clipping). min-width:0 lets flex children shrink.
+    target.style.setProperty("box-sizing","border-box","important");
+    target.style.setProperty("max-width","100%","important");
+    target.style.setProperty("min-width","0","important");
+    target.style.setProperty("white-space","normal","important");
+    target.style.setProperty("overflow-wrap","anywhere","important");
+    target.style.setProperty("word-break","normal","important");
+    if(dir==="rtl")target.style.setProperty("width","auto","important");
     target.classList.toggle("smart-rtl",dir==="rtl");
     target.classList.toggle("smart-ltr",dir==="ltr");
   }
@@ -353,7 +362,12 @@ $SMART_JS = @'
     // Shift only the title text within its flex/grid row (toolbar buttons stay).
     if(dir==="rtl"){target.style.setProperty("margin-inline-start","auto","important");target.style.setProperty("margin-inline-end","0","important");}
     else{target.style.setProperty("margin-inline-start","0","important");target.style.setProperty("margin-inline-end","auto","important");}
+    // Bounded width (room for toolbar buttons) + wrap so long titles never clip.
+    target.style.setProperty("box-sizing","border-box","important");
     target.style.setProperty("max-width","calc(100% - 96px)","important");
+    target.style.setProperty("min-width","0","important");
+    target.style.setProperty("white-space","normal","important");
+    target.style.setProperty("overflow-wrap","anywhere","important");
   }
   var HEADER_SEL=[
     "header h1","header h2","header h3","header [role=\"heading\"]","header [class*=\"title\"]","header [class*=\"heading\"]","header [data-testid*=\"title\"]","header [data-testid*=\"heading\"]",
