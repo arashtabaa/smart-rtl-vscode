@@ -43,6 +43,9 @@ $SMART_CSS_CORE = @'
 .smart-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important}
 .smart-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important}
 .smart-rtl:is(h1,h2,h3,h4,h5,h6,p,li,blockquote,div){width:100% !important;align-self:stretch !important;justify-self:stretch !important}
+.smart-header-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important}
+.smart-header-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important}
+button,[role="button"],svg{unicode-bidi:normal}
 .composer-smart-rtl{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-rtl>p,.composer-smart-rtl>div{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
@@ -158,14 +161,18 @@ $SMART_JS = @'
   }
   // Coalesced multi-pass: re-run a few times so late insertions are caught, but a
   // burst of mutations schedules only one batch (avoids setTimeout pile-up).
+  function runDirectionPasses(){
+    applySmartDirectionToRenderedText(document);
+    applySmartDirectionToHeaderTitles(document);
+  }
   var _passPending=false;
   function scheduleSmartDirectionPass(){
     if(_passPending)return;
     _passPending=true;
-    try{if(window.requestAnimationFrame)window.requestAnimationFrame(function(){applySmartDirectionToRenderedText(document);});}catch(e){}
-    setTimeout(function(){applySmartDirectionToRenderedText(document);},50);
-    setTimeout(function(){applySmartDirectionToRenderedText(document);},250);
-    setTimeout(function(){applySmartDirectionToRenderedText(document);_passPending=false;},750);
+    try{if(window.requestAnimationFrame)window.requestAnimationFrame(runDirectionPasses);}catch(e){}
+    setTimeout(runDirectionPasses,50);
+    setTimeout(runDirectionPasses,250);
+    setTimeout(function(){runDirectionPasses();_passPending=false;},750);
   }
   // ---- Composer: style BOTH the editable (caret) and its mirror (text) ----
   // Real DOM (Claude Code webview): div.messageInputContainer >
@@ -173,23 +180,41 @@ $SMART_JS = @'
   //   div.mentionMirror (aria-hidden, position:absolute, inset:0)                                -> visible text
   function isRtlChar(ch){return RTL_RE.test(ch);}
   function isLatinChar(ch){return LTR_RE.test(ch);}
+  // Emoji / icon / bullet / punctuation / number are "neutral": ignored for
+  // direction so a Persian title that starts with an icon is still detected RTL.
+  // ASCII-only (\p{Extended_Pictographic} + \u escapes) to survive PS 5.1 encoding.
+  var NEUTRAL_RE=/[\s\d`"'()\[\]{}<>:;,.!?\-_=+*\/\\|@#$%^&~\u060C\u061B\u061F\u066B\u066C\u00AB\u00BB\u2013\u2014\u2022\u00B7\u25CF\u25CB\u25AA\u25AB\u25A0\u25A1\u25B6\u25BA\u2713\u2714\u2705\u274C\u26A0\u2B50\uFE0E\uFE0F\u200D]/;
+  function isEmojiOrNeutral(ch){
+    if(NEUTRAL_RE.test(ch))return true;
+    try{return /\p{Extended_Pictographic}/u.test(ch);}catch(e){return false;}
+  }
+  function isAllNeutral(t){
+    for(var i=0;i<t.length;i++){if(!isEmojiOrNeutral(t[i]))return false;}
+    return t.length>0;
+  }
   function normalizeToken(raw){
-    return String(raw||"").replace(/^[`"'()\[\]{}<>:;,\u060C.!\u061F\u00AB\u00BB]+|[`"'()\[\]{}<>:;,\u060C.!\u061F\u00AB\u00BB]+$/g,"").trim();
+    var s=String(raw||""),a=0,b=s.length;
+    while(a<b&&isEmojiOrNeutral(s[a]))a++;
+    while(b>a&&isEmojiOrNeutral(s[b-1]))b--;
+    return s.slice(a,b).trim();
   }
   function isTechnicalToken(token){
     var t=(token||"").trim();
     if(!t)return true;
-    return (/^https?:\/\//i.test(t)||/^[.\/\\~]/.test(t)||/[.\/\\]/.test(t)||/\.[A-Za-z0-9]{1,12}$/.test(t)||/^[?$@#]/.test(t)||/[?=&]/.test(t)||/[_\/\\.-]/.test(t)||/\d/.test(t)||/^[A-Z0-9_.\/\\-]+$/.test(t)||/^(git|npm|pnpm|yarn|node|php|js|ts|css|html|json|md|feat|fix|chore|refactor|feature|bugfix|hotfix|branch|commit|tag|powershell|bash|cmd|remote|fork|push|pr|classic|fine-grained)$/i.test(t)||/^[`"'()\[\]{}<>:;,\u060C.!\u061F\u00AB\u00BB\s]+$/.test(t));
+    if(isAllNeutral(t))return true;
+    return (/^https?:\/\//i.test(t)||/^[.\/\\~]/.test(t)||/[.\/\\]/.test(t)||/\.[A-Za-z0-9]{1,12}$/.test(t)||/^[?$@#]/.test(t)||/[?=&]/.test(t)||/[_\/\\.-]/.test(t)||/\d/.test(t)||/^[A-Z0-9_.\/\\-]+$/.test(t)||/^(git|npm|pnpm|yarn|node|php|js|ts|css|html|json|md|feat|fix|chore|refactor|feature|bugfix|hotfix|branch|commit|tag|powershell|bash|cmd|remote|fork|push|pr|classic|fine-grained|delete|claude|vscode|rtl)$/i.test(t));
   }
-  // Pure-Persian short-circuits to rtl, pure-Latin to ltr; mixed falls back to the
-  // first strong NON-technical token, then to rtl when any Persian is present.
+  // Pure-Persian -> rtl, pure-Latin -> ltr. Mixed: skip leading neutrals/emoji to
+  // the first strong char; else fall back to the first strong NON-technical token,
+  // then to rtl when any Persian is present.
   function detectSmartDirection(text){
-    var value=(text||"").trim();
+    var value=String(text||"").trim();
     if(!value)return "ltr";
     var rtlCount=0,latinCount=0;
     for(var i=0;i<value.length;i++){var ch=value[i];if(isRtlChar(ch))rtlCount++;else if(isLatinChar(ch))latinCount++;}
     if(rtlCount===0)return "ltr";
     if(latinCount===0)return "rtl";
+    for(var p=0;p<value.length;p++){var c0=value[p];if(isRtlChar(c0))return "rtl";if(isLatinChar(c0))break;}
     var tokens=value.split(/\s+/);
     for(var j=0;j<tokens.length;j++){
       var token=normalizeToken(tokens[j]);
@@ -282,8 +307,84 @@ $SMART_JS = @'
   function composerHandler(useData){
     return function(e){updateComposerDirection(useData?(e.data||""):"");};
   }
+  // ---- Top header / title-bar: move ONLY the title text, never the toolbar. ----
+  // Apply to the title text element (or nearest safe text-only title container),
+  // and shift it within its flex/grid row via margin-inline so buttons don't move.
+  function shouldSkipHeaderTextFix(el){
+    if(!el||!(el instanceof HTMLElement))return true;
+    if(!isVisible(el))return true;
+    return !!el.closest('button, [role="button"], svg, pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff');
+  }
+  function isSafeHeaderTitleTarget(el){
+    if(!el||!(el instanceof HTMLElement))return false;
+    if(shouldSkipHeaderTextFix(el))return false;
+    var text=(el.textContent||"").trim();
+    if(!text||text.length>220)return false;
+    if(el.querySelector('button, [role="button"], svg, input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"]'))return false;
+    return true;
+  }
+  function findHeaderTitleOwner(el){
+    if(!el||!(el instanceof HTMLElement))return null;
+    var current=el;
+    for(var depth=0;current&&depth<6;depth++){
+      if(!(current instanceof HTMLElement))break;
+      if(!isSafeHeaderTitleTarget(current)){current=current.parentElement;continue;}
+      var tag=current.tagName.toLowerCase();
+      if(tag==="h1"||tag==="h2"||tag==="h3"||tag==="h4"||tag==="h5"||tag==="h6"||current.getAttribute("role")==="heading"||current.matches('[class*="title"], [class*="heading"], [class*="header"], [data-testid*="title"], [data-testid*="heading"], [aria-label*="title"]'))return current;
+      var style=window.getComputedStyle(current);
+      var text=(current.textContent||"").trim();
+      if((style.display==="block"||style.display==="flex"||style.display==="grid"||style.display==="inline-block")&&text.length<=180&&!current.querySelector("p, li, blockquote, h1, h2, h3, h4, h5, h6, pre"))return current;
+      current=current.parentElement;
+    }
+    return isSafeHeaderTitleTarget(el)?el:null;
+  }
+  function applyHeaderTitleDirection(target){
+    if(!isSafeHeaderTitleTarget(target))return;
+    var text=(target.textContent||"").trim();
+    if(!text)return;
+    var dir=detectSmartDirection(text);
+    var align=dir==="rtl"?"right":"left";
+    target.setAttribute("dir",dir);
+    target.style.setProperty("direction",dir,"important");
+    target.style.setProperty("text-align",align,"important");
+    target.style.setProperty("unicode-bidi","plaintext","important");
+    target.classList.toggle("smart-header-rtl",dir==="rtl");
+    target.classList.toggle("smart-header-ltr",dir==="ltr");
+    // Shift only the title text within its flex/grid row (toolbar buttons stay).
+    if(dir==="rtl"){target.style.setProperty("margin-inline-start","auto","important");target.style.setProperty("margin-inline-end","0","important");}
+    else{target.style.setProperty("margin-inline-start","0","important");target.style.setProperty("margin-inline-end","auto","important");}
+    target.style.setProperty("max-width","calc(100% - 96px)","important");
+  }
+  var HEADER_SEL=[
+    "header h1","header h2","header h3","header [role=\"heading\"]","header [class*=\"title\"]","header [class*=\"heading\"]","header [data-testid*=\"title\"]","header [data-testid*=\"heading\"]",
+    "[class*=\"header\"] h1","[class*=\"header\"] h2","[class*=\"header\"] h3","[class*=\"header\"] [role=\"heading\"]","[class*=\"header\"] [class*=\"title\"]","[class*=\"header\"] [data-testid*=\"title\"]",
+    "[class*=\"top\"] [class*=\"title\"]","[class*=\"top\"] [role=\"heading\"]","[data-testid*=\"header\"] [data-testid*=\"title\"]","[data-testid*=\"top\"] [data-testid*=\"title\"]"
+  ].join(",");
+  function applySmartDirectionToHeaderTitles(root){
+    root=root||document;
+    try{
+      var nodes=(root.nodeType===1||root.nodeType===9)?root.querySelectorAll(HEADER_SEL):[];
+      for(var i=0;i<nodes.length;i++){var t=findHeaderTitleOwner(nodes[i]);if(t)applyHeaderTitleDirection(t);}
+    }catch(e){}
+    // Fallback: short visible text nodes near the top of the viewport.
+    try{
+      if(!(root.nodeType===1||root.nodeType===9))return;
+      var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:function(node){
+        var v=node.nodeValue||"";
+        if(!v.trim()||v.trim().length>180)return NodeFilter.FILTER_REJECT;
+        var parent=node.parentElement;
+        if(!parent||shouldSkipHeaderTextFix(parent))return NodeFilter.FILTER_REJECT;
+        if(parent.getBoundingClientRect().top>140)return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }});
+      var targets=[];
+      while(walker.nextNode()){var owner=findHeaderTitleOwner(walker.currentNode.parentElement);if(owner&&targets.indexOf(owner)===-1)targets.push(owner);}
+      for(var j=0;j<targets.length;j++)applyHeaderTitleDirection(targets[j]);
+    }catch(e){}
+  }
   function start(){
     applySmartDirectionToRenderedText(document);
+    applySmartDirectionToHeaderTitles(document);
     updateComposerDirection("");
     document.addEventListener("beforeinput",composerHandler(true),true);
     document.addEventListener("input",composerHandler(false),true);
@@ -304,7 +405,7 @@ $SMART_JS = @'
             sawChildList=true;
             for(var n=0;n<mu.addedNodes.length;n++){
               var node=mu.addedNodes[n];
-              if(node.nodeType===1)applySmartDirectionToRenderedText(node);
+              if(node.nodeType===1){applySmartDirectionToRenderedText(node);applySmartDirectionToHeaderTitles(node);}
             }
           }else if(mu.type==="characterData"){
             // Text inserted into an existing node: coalesced full re-pass.
