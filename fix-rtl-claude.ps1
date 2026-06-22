@@ -42,11 +42,12 @@ pre,code,kbd,samp,.cm-editor,.monaco-editor{font-family:"SF Mono",Monaco,Consola
 $SMART_CSS_CORE = @'
 .smart-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important}
 .smart-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important}
+.smart-rtl:is(h1,h2,h3,h4,h5,h6,p,li,blockquote,div){width:100% !important;align-self:stretch !important;justify-self:stretch !important}
 .composer-smart-rtl{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-rtl>p,.composer-smart-rtl>div{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr>p,.composer-smart-ltr>div{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
-pre,code,kbd,samp,.diff,.cm-editor,.monaco-editor{direction:ltr !important;text-align:left !important;unicode-bidi:normal !important}
+pre,pre *,code,kbd,samp,.diff,.cm-editor,.monaco-editor{direction:ltr !important;text-align:left !important;unicode-bidi:normal !important}
 form:has(textarea),form:has([contenteditable]),form:has([role="textbox"]){direction:ltr !important}
 '@
 
@@ -55,49 +56,116 @@ $SMART_JS = @'
 ;(function(){
   var RTL_RE=/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
   var LTR_RE=/[A-Za-z]/;
-  // ---- Rendered conversation text: submitted user prompts, the pending bubble,
-  //      assistant messages, and thinking/status/progress lines. ----
-  // Real Claude Code selectors (verified in the webview bundle):
-  //   submitted user prompt -> div.userMessage_xxxxxx  (no data-testid, capital M)
-  //   assistant message      -> [data-testid="assistant-message"] > .rendered-markdown
-  //   status/thinking        -> .progressContent_xxx / .loadingState_xxx / .metaMessage_xxx
-  // detectSmartDirection()/isVisible() are defined below (function-hoisted; every
-  // call happens from start(), which runs after all of this is assigned).
-  var RENDERED_SEL=[
-    ".rendered-markdown p",".rendered-markdown li",".rendered-markdown h1",".rendered-markdown h2",".rendered-markdown h3",".rendered-markdown h4",".rendered-markdown blockquote",
-    "[data-testid*=\"message\"] p","[data-testid*=\"message\"] li","[data-testid*=\"message\"] blockquote",
-    "[class*=\"userMessage_\"]",
-    "[class*=\"progressContent\"]","[class*=\"loadingState\"]","[class*=\"metaMessage\"]","[class*=\"spinnerRow\"]","[class*=\"emptyStateText\"]",
-    "[class*=\"thinking\"]","[class*=\"status\"]"
-  ].join(",");
-  var RENDER_SKIP='textarea, input, [contenteditable], [role="textbox"], .cm-editor, .monaco-editor, .diff, pre, code, [class*="mirror"], [class*="Mirror"]';
-  function applyRenderedTextDirection(el){
-    if(!el||!(el instanceof HTMLElement))return;
-    if(el.closest(RENDER_SKIP))return;
-    if(!isVisible(el))return;
-    var text=(el.textContent||"").trim();
-    if(!text||text.length>2000)return; // skip huge multi-message containers
-    var dir=detectSmartDirection(text);
-    el.setAttribute("dir",dir);
-    el.style.setProperty("direction",dir,"important");
-    el.style.setProperty("text-align","start","important");
-    el.style.setProperty("unicode-bidi","plaintext","important");
-    el.classList.toggle("smart-rtl",dir==="rtl");
-    el.classList.toggle("smart-ltr",dir==="ltr");
+  // ---- Rendered conversation text: headings/titles, user prompts, assistant
+  //      messages, list items, thinking/status lines. ----
+  // RENDERED text uses explicit text-align:right/left (NOT start): headings often
+  // sit in flex/shrink wrappers where `start` does not visually move them. We also
+  // resolve the real block-level OWNER of each Persian run (not an inner span), and
+  // a text-node fallback so nothing is missed. (Composer keeps text-align:start.)
+  // detectSmartDirection()/isVisible()/isRtlChar() are defined below (hoisted).
+  function containsRtl(text){return RTL_RE.test(String(text||""));}
+  function shouldSkipDirectionFix(el){
+    if(!el||!(el instanceof HTMLElement))return true;
+    if(!isVisible(el))return true;
+    return !!el.closest('pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [class*="mirror"], [class*="Mirror"]');
   }
-  function applyRenderedMessages(root){
+  function isSafeDirectionTarget(el){
+    if(!el||!(el instanceof HTMLElement))return false;
+    if(shouldSkipDirectionFix(el))return false;
+    var text=(el.textContent||"").trim();
+    if(!text||text.length>2500)return false;
+    if(el.querySelector('pre, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor'))return false;
+    return true;
+  }
+  function findNearestMessageRoot(el){
+    return el.closest('[data-testid*="message"], [class*="message"], [class*="Message"], [data-testid*="assistant"], [class*="assistant"], [data-testid*="user"], [class*="user"], [class*="progressContent"], [class*="loadingState"]')||el.closest("main, article, section")||document.body;
+  }
+  var BLOCK_TAGS={p:1,li:1,blockquote:1,h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,summary:1,figcaption:1};
+  // Walk up from a Persian run to the nearest safe block-level owner so direction
+  // lands on the element that owns the line layout (not an inner span).
+  function findBlockOwner(el){
+    if(!el||!(el instanceof HTMLElement))return null;
+    var messageRoot=findNearestMessageRoot(el);
+    var current=el;
+    for(var depth=0;current&&depth<8;depth++){
+      if(!(current instanceof HTMLElement))break;
+      if(current===document.body)break;
+      if(messageRoot&&current.parentElement&&!messageRoot.contains(current))break;
+      if(!isSafeDirectionTarget(current)){current=current.parentElement;continue;}
+      var tag=current.tagName.toLowerCase();
+      if(BLOCK_TAGS[tag])return current;
+      if(current.getAttribute("role")==="heading"||current.matches('[class*="title"], [class*="heading"], [class*="header"], [class*="label"], [data-testid*="title"], [data-testid*="heading"], [data-testid*="label"]'))return current;
+      var style=window.getComputedStyle(current);
+      var text=(current.textContent||"").trim();
+      var hasNested=current.querySelector("p, li, blockquote, h1, h2, h3, h4, h5, h6, pre");
+      var childCount=Array.prototype.slice.call(current.children||[]).filter(isVisible).length;
+      // Custom title/line divs: a small, leaf-ish block/flex/grid element.
+      if((style.display==="block"||style.display==="flex"||style.display==="grid"||style.display==="list-item")&&text.length<=500&&!hasNested&&childCount<=6)return current;
+      current=current.parentElement;
+    }
+    return el;
+  }
+  function applyRenderedDirectionToTarget(target){
+    if(!isSafeDirectionTarget(target))return;
+    var text=(target.textContent||"").trim();
+    if(!text)return;
+    var dir=detectSmartDirection(text);
+    var align=dir==="rtl"?"right":"left";
+    target.setAttribute("dir",dir);
+    target.style.setProperty("direction",dir,"important");
+    target.style.setProperty("text-align",align,"important");
+    target.style.setProperty("unicode-bidi","plaintext","important");
+    // Headings/titles inside flex/shrink layouts only move once they stretch.
+    if(dir==="rtl"){
+      target.style.setProperty("width","100%","important");
+      target.style.setProperty("align-self","stretch","important");
+      target.style.setProperty("justify-self","stretch","important");
+    }
+    target.classList.toggle("smart-rtl",dir==="rtl");
+    target.classList.toggle("smart-ltr",dir==="ltr");
+  }
+  var RENDERED_SEL=[
+    ".markdown p",".markdown li",".markdown blockquote",".markdown h1",".markdown h2",".markdown h3",".markdown h4",".markdown h5",".markdown h6",
+    ".rendered-markdown p",".rendered-markdown li",".rendered-markdown blockquote",".rendered-markdown h1",".rendered-markdown h2",".rendered-markdown h3",".rendered-markdown h4",".rendered-markdown h5",".rendered-markdown h6",
+    "h1","h2","h3","h4","h5","h6","[role=\"heading\"]","summary",
+    "[class*=\"title\"]","[class*=\"heading\"]","[class*=\"header\"]","[class*=\"label\"]","[data-testid*=\"title\"]","[data-testid*=\"heading\"]","[data-testid*=\"label\"]",
+    "[data-testid*=\"message\"] p","[data-testid*=\"message\"] li","[data-testid*=\"message\"] div","[data-testid*=\"message\"] span",
+    "[class*=\"message\"] p","[class*=\"message\"] li","[class*=\"message\"] div","[class*=\"message\"] span",
+    "[class*=\"userMessage_\"]",
+    "[class*=\"thinking\"]","[class*=\"status\"]","[data-testid*=\"thinking\"]","[data-testid*=\"status\"]"
+  ].join(",");
+  function applySmartDirectionToRenderedText(root){
     root=root||document;
     try{
-      if(root.nodeType===1&&root.matches&&root.matches(RENDERED_SEL))applyRenderedTextDirection(root);
-      var els=root.querySelectorAll(RENDERED_SEL);
-      for(var i=0;i<els.length;i++)applyRenderedTextDirection(els[i]);
+      var nodes=(root.nodeType===1||root.nodeType===9)?root.querySelectorAll(RENDERED_SEL):[];
+      for(var i=0;i<nodes.length;i++){var t=findBlockOwner(nodes[i]);if(t)applyRenderedDirectionToTarget(t);}
+    }catch(e){}
+    // Fallback: every visible Persian text node -> nearest safe block owner.
+    try{
+      if(!(root.nodeType===1||root.nodeType===9))return;
+      var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:function(node){
+        var v=node.nodeValue||"";
+        if(!v.trim())return NodeFilter.FILTER_REJECT;
+        if(!containsRtl(v))return NodeFilter.FILTER_REJECT;
+        var parent=node.parentElement;
+        if(!parent||shouldSkipDirectionFix(parent))return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }});
+      var targets=[];
+      while(walker.nextNode()){var owner=findBlockOwner(walker.currentNode.parentElement);if(owner&&targets.indexOf(owner)===-1)targets.push(owner);}
+      for(var j=0;j<targets.length;j++)applyRenderedDirectionToTarget(targets[j]);
     }catch(e){}
   }
-  // Text can be inserted into an existing node after submit, so re-run a few times.
-  function scheduleRenderedPass(){
-    try{if(window.requestAnimationFrame)window.requestAnimationFrame(function(){applyRenderedMessages(document);});}catch(e){}
-    setTimeout(function(){applyRenderedMessages(document);},50);
-    setTimeout(function(){applyRenderedMessages(document);},250);
+  // Coalesced multi-pass: re-run a few times so late insertions are caught, but a
+  // burst of mutations schedules only one batch (avoids setTimeout pile-up).
+  var _passPending=false;
+  function scheduleSmartDirectionPass(){
+    if(_passPending)return;
+    _passPending=true;
+    try{if(window.requestAnimationFrame)window.requestAnimationFrame(function(){applySmartDirectionToRenderedText(document);});}catch(e){}
+    setTimeout(function(){applySmartDirectionToRenderedText(document);},50);
+    setTimeout(function(){applySmartDirectionToRenderedText(document);},250);
+    setTimeout(function(){applySmartDirectionToRenderedText(document);_passPending=false;},750);
   }
   // ---- Composer: style BOTH the editable (caret) and its mirror (text) ----
   // Real DOM (Claude Code webview): div.messageInputContainer >
@@ -105,28 +173,34 @@ $SMART_JS = @'
   //   div.mentionMirror (aria-hidden, position:absolute, inset:0)                                -> visible text
   function isRtlChar(ch){return RTL_RE.test(ch);}
   function isLatinChar(ch){return LTR_RE.test(ch);}
+  function normalizeToken(raw){
+    return String(raw||"").replace(/^[`"'()\[\]{}<>:;,\u060C.!\u061F\u00AB\u00BB]+|[`"'()\[\]{}<>:;,\u060C.!\u061F\u00AB\u00BB]+$/g,"").trim();
+  }
   function isTechnicalToken(token){
     var t=(token||"").trim();
     if(!t)return true;
-    return (/^https?:\/\//i.test(t)||/^[.\/\\~]/.test(t)||/[.\/\\]/.test(t)||/\.[A-Za-z0-9]{1,8}$/.test(t)||/^[?$@#]/.test(t)||/[?=&]/.test(t)||/[_-]/.test(t)||/\d/.test(t)||/^[A-Z0-9_.\/\\-]+$/.test(t)||/^[`"'()\[\]{}<>:;,\u060C.!\u061F\s]+$/.test(t));
+    return (/^https?:\/\//i.test(t)||/^[.\/\\~]/.test(t)||/[.\/\\]/.test(t)||/\.[A-Za-z0-9]{1,12}$/.test(t)||/^[?$@#]/.test(t)||/[?=&]/.test(t)||/[_\/\\.-]/.test(t)||/\d/.test(t)||/^[A-Z0-9_.\/\\-]+$/.test(t)||/^(git|npm|pnpm|yarn|node|php|js|ts|css|html|json|md|feat|fix|chore|refactor|feature|bugfix|hotfix|branch|commit|tag|powershell|bash|cmd|remote|fork|push|pr|classic|fine-grained)$/i.test(t)||/^[`"'()\[\]{}<>:;,\u060C.!\u061F\u00AB\u00BB\s]+$/.test(t));
   }
+  // Pure-Persian short-circuits to rtl, pure-Latin to ltr; mixed falls back to the
+  // first strong NON-technical token, then to rtl when any Persian is present.
   function detectSmartDirection(text){
     var value=(text||"").trim();
     if(!value)return "ltr";
+    var rtlCount=0,latinCount=0;
+    for(var i=0;i<value.length;i++){var ch=value[i];if(isRtlChar(ch))rtlCount++;else if(isLatinChar(ch))latinCount++;}
+    if(rtlCount===0)return "ltr";
+    if(latinCount===0)return "rtl";
     var tokens=value.split(/\s+/);
-    for(var i=0;i<tokens.length;i++){
-      var token=tokens[i].replace(/^[`"'()\[\]{}<>:;,\u060C.!\u061F]+|[`"'()\[\]{}<>:;,\u060C.!\u061F]+$/g,"");
+    for(var j=0;j<tokens.length;j++){
+      var token=normalizeToken(tokens[j]);
       if(!token)continue;
       var hasRtl=false,hasLatin=false;
-      for(var k=0;k<token.length;k++){var ch=token[k];if(isRtlChar(ch))hasRtl=true;if(isLatinChar(ch))hasLatin=true;}
+      for(var k=0;k<token.length;k++){var c=token[k];if(isRtlChar(c))hasRtl=true;if(isLatinChar(c))hasLatin=true;}
       if(hasRtl)return "rtl";
       if(isTechnicalToken(token))continue;
       if(hasLatin)return "ltr";
     }
-    var rtlCount=0,latinCount=0;
-    for(var j=0;j<value.length;j++){var c=value[j];if(isRtlChar(c))rtlCount++;else if(isLatinChar(c))latinCount++;}
-    if(rtlCount>0&&rtlCount>=latinCount*0.25)return "rtl";
-    return "ltr";
+    return "rtl";
   }
   function isVisible(el){
     if(!el||!(el instanceof HTMLElement))return false;
@@ -209,7 +283,7 @@ $SMART_JS = @'
     return function(e){updateComposerDirection(useData?(e.data||""):"");};
   }
   function start(){
-    applyRenderedMessages(document);
+    applySmartDirectionToRenderedText(document);
     updateComposerDirection("");
     document.addEventListener("beforeinput",composerHandler(true),true);
     document.addEventListener("input",composerHandler(false),true);
@@ -218,9 +292,9 @@ $SMART_JS = @'
     document.addEventListener("compositionend",composerHandler(false),true);
     document.addEventListener("focusin",composerHandler(false),true);
     // After submit/send, the prompt bubble is rendered in a new element.
-    document.addEventListener("submit",scheduleRenderedPass,true);
-    document.addEventListener("keydown",function(e){if(e.key==="Enter")scheduleRenderedPass();},true);
-    document.addEventListener("click",scheduleRenderedPass,true);
+    document.addEventListener("submit",scheduleSmartDirectionPass,true);
+    document.addEventListener("keydown",function(e){if(e.key==="Enter")scheduleSmartDirectionPass();},true);
+    document.addEventListener("click",scheduleSmartDirectionPass,true);
     try{
       new MutationObserver(function(mutations){
         var sawChildList=false;
@@ -230,12 +304,11 @@ $SMART_JS = @'
             sawChildList=true;
             for(var n=0;n<mu.addedNodes.length;n++){
               var node=mu.addedNodes[n];
-              if(node.nodeType===1)applyRenderedMessages(node);
+              if(node.nodeType===1)applySmartDirectionToRenderedText(node);
             }
           }else if(mu.type==="characterData"){
-            // Text inserted into an existing node: re-scan its message container.
-            var t=mu.target,p=(t.nodeType===1)?t:t.parentElement;
-            if(p){var box=p.closest&&p.closest('[class*="userMessage_"], [class*="message"], [data-testid*="message"], .rendered-markdown');applyRenderedMessages(box||p);}
+            // Text inserted into an existing node: coalesced full re-pass.
+            scheduleSmartDirectionPass();
           }
         }
         if(sawChildList)updateComposerDirection("");
