@@ -55,7 +55,7 @@ button,[role="button"],svg{unicode-bidi:normal}
 /* Question / choice modals & dialogs */
 .smart-modal-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
 .smart-modal-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
-[role="dialog"] button:has(svg),[aria-modal="true"] button:has(svg){direction:ltr !important;text-align:center !important}
+button:has(svg):not(.smart-modal-rtl):not(.smart-modal-ltr){direction:ltr !important;text-align:center !important}
 .composer-smart-rtl{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-rtl>p,.composer-smart-rtl>div{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
@@ -223,7 +223,7 @@ $SMART_JS = @'
     var t=(token||"").trim();
     if(!t)return true;
     if(isAllNeutral(t))return true;
-    return (/^https?:\/\//i.test(t)||/^[.\/\\~]/.test(t)||/[.\/\\]/.test(t)||/\.[A-Za-z0-9]{1,12}$/.test(t)||/^[?$@#]/.test(t)||/[?=&]/.test(t)||/[_\/\\.-]/.test(t)||/\d/.test(t)||/^[A-Z0-9_.\/\\-]+$/.test(t)||/^(git|npm|pnpm|yarn|node|php|js|ts|css|html|json|md|feat|fix|chore|refactor|feature|bugfix|hotfix|branch|commit|tag|powershell|bash|cmd|remote|fork|push|pr|classic|fine-grained|delete|claude|vscode|rtl|blog|our|story|home|store|other)$/i.test(t));
+    return (/^https?:\/\//i.test(t)||/^[.\/\\~]/.test(t)||/[.\/\\]/.test(t)||/\.[A-Za-z0-9]{1,12}$/.test(t)||/^[?$@#]/.test(t)||/[?=&]/.test(t)||/[_\/\\.-]/.test(t)||/\d/.test(t)||/^[A-Z0-9_.\/\\-]+$/.test(t)||/^(git|npm|pnpm|yarn|node|php|js|ts|css|html|json|md|feat|fix|chore|refactor|feature|bugfix|hotfix|branch|commit|tag|powershell|bash|cmd|remote|fork|push|pr|classic|fine-grained|delete|claude|vscode|rtl|blog|our|story|home|store|other|olive|oil|honey)$/i.test(t));
   }
   // Pure-Persian -> rtl, pure-Latin -> ltr. Mixed: skip leading neutrals/emoji to
   // the first strong char; else fall back to the first strong NON-technical token,
@@ -412,10 +412,10 @@ $SMART_JS = @'
       }
     }catch(e){}
   }
-  // ---- Question / choice modals & dialogs ----
-  // Reuses detectSmartDirection/isVisible. Styles meaningful-text choices (which may
-  // be <button>/role=option) but skips icon-only controls (close, etc). Integrated
-  // into the SAME rAF observer below - no extra observer, so no streaming hang.
+  // ---- Question / choice modals & dialogs (heuristic detection) ----
+  // This UI does NOT use [role=dialog]/[aria-modal]/.modal. Detect the panel by its
+  // markers ("Submit answers" / "Esc to cancel") + radio rows. Reuses the shared
+  // detector and is integrated into the SAME rAF observer (no extra observer).
   var MODAL_ROOT_SEL='[role="dialog"], [aria-modal="true"], [class*="modal"], [class*="Modal"], [class*="dialog"], [class*="Dialog"], [class*="popover"], [class*="Popover"], [data-testid*="modal"], [data-testid*="dialog"]';
   function hasMeaningfulText(el){
     var t=(el.textContent||"").trim();
@@ -425,6 +425,44 @@ $SMART_JS = @'
     if(!el||!(el instanceof HTMLElement))return false;
     var t=(el.textContent||"").trim();
     return !!el.querySelector("svg")&&t.length<=2;
+  }
+  function looksLikeQuestionModal(el){
+    if(!el||!(el instanceof HTMLElement))return false;
+    var text=(el.textContent||"").trim();
+    if(text.length<20||text.length>6000)return false;
+    var hasSubmit=/Submit answers/i.test(text);
+    var hasEsc=/Esc\s+to\s+cancel/i.test(text);
+    if(!hasSubmit&&!hasEsc)return false; // cheap early-out for the vast majority of nodes
+    if(!isVisible(el))return false;
+    var hasOther=/\bOther\b/i.test(text);
+    var radioLikeCount=el.querySelectorAll('input[type="radio"], [role="radio"], [aria-checked], [class*="radio"], [class*="option"]').length;
+    var meaningful=0,tn=el.querySelectorAll("div, span, p, label, button");
+    for(var i=0;i<tn.length;i++){var n=tn[i];if(n instanceof HTMLElement&&isVisible(n)&&hasMeaningfulText(n))meaningful++;}
+    return (hasSubmit&&hasEsc)||(hasSubmit&&radioLikeCount>=2)||(hasEsc&&radioLikeCount>=2)||(hasOther&&radioLikeCount>=2&&meaningful>=5);
+  }
+  function getQuestionModalRoots(root){
+    root=root||document;
+    var out=[];
+    try{
+      var direct=root.querySelectorAll(MODAL_ROOT_SEL);
+      for(var i=0;i<direct.length;i++)if(isVisible(direct[i]))out.push(direct[i]);
+      // Heuristic scan is gated on the marker text, so it is skipped entirely unless
+      // a question panel is actually present (keeps streaming/typing cheap).
+      var rt=root.textContent||"";
+      if(/Submit answers|Esc\s+to\s+cancel/i.test(rt)){
+        if(root.nodeType===1&&looksLikeQuestionModal(root))out.push(root);
+        var cands=root.querySelectorAll("section, article, form, div");
+        var heur=[];
+        for(var j=0;j<cands.length;j++){if(looksLikeQuestionModal(cands[j]))heur.push(cands[j]);}
+        // Prefer the smallest matching container.
+        heur.sort(function(a,b){var ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();return ar.width*ar.height-br.width*br.height;});
+        for(var k=0;k<heur.length;k++)out.push(heur[k]);
+      }
+    }catch(e){}
+    var uniq=[];
+    for(var m=0;m<out.length;m++)if(uniq.indexOf(out[m])===-1)uniq.push(out[m]);
+    // Drop ancestors that fully contain a smaller matching root.
+    return uniq.filter(function(el){return !uniq.some(function(o){return o!==el&&el.contains(o);});});
   }
   function shouldSkipModalTextFix(el){
     if(!el||!(el instanceof HTMLElement))return true;
@@ -437,29 +475,34 @@ $SMART_JS = @'
     if(!el||!(el instanceof HTMLElement))return false;
     if(shouldSkipModalTextFix(el))return false;
     var text=(el.textContent||"").trim();
-    if(!text||text.length>1200)return false;
+    if(!text||text.length>1400)return false;
     if(el.querySelector('pre, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor'))return false;
     return true;
   }
   var MODAL_BLOCK_TAGS={p:1,li:1,label:1,legend:1,h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,summary:1,figcaption:1};
+  // Prefer the TEXT column, never a row that holds a radio/checkbox/icon (directing
+  // that row would move the control). Pure-text leaves win; control rows are skipped.
   function findModalTextOwner(el){
     if(!el||!(el instanceof HTMLElement))return null;
     var current=el;
-    for(var depth=0;current&&depth<6;depth++){
+    for(var depth=0;current&&depth<7;depth++){
       if(!(current instanceof HTMLElement))break;
       if(!isSafeModalTextTarget(current)){current=current.parentElement;continue;}
+      var childCount=Array.prototype.slice.call(current.children||[]).filter(isVisible).length;
+      if(childCount===0)return current; // pure-text leaf -> style it directly
+      // A control row (radio/checkbox/icon inside) must not be directed as a whole.
+      if(current.querySelector('input, [role="radio"], [role="checkbox"], [aria-checked], svg')){current=current.parentElement;continue;}
       var tag=current.tagName.toLowerCase();
       if(MODAL_BLOCK_TAGS[tag])return current;
       var role=current.getAttribute("role");
-      if(role==="heading"||role==="option"||role==="radio"||role==="menuitemradio"||current.matches('[class*="title"], [class*="heading"], [class*="label"], [class*="description"], [data-testid*="title"], [data-testid*="label"], [data-testid*="description"]'))return current;
+      if(role==="heading"||current.matches('[class*="title"], [class*="heading"], [class*="label"], [class*="description"], [class*="question"], [class*="answer"], [data-testid*="title"], [data-testid*="label"], [data-testid*="description"], [data-testid*="question"], [data-testid*="answer"]'))return current;
       var style=window.getComputedStyle(current);
       var text=(current.textContent||"").trim();
       var hasNested=current.querySelector("p, li, label, h1, h2, h3, h4, h5, h6, pre");
-      var childCount=Array.prototype.slice.call(current.children||[]).filter(isVisible).length;
-      if((style.display==="block"||style.display==="flex"||style.display==="grid"||style.display==="list-item")&&text.length<=600&&!hasNested&&childCount<=8)return current;
+      if((style.display==="block"||style.display==="flex"||style.display==="grid"||style.display==="list-item")&&text.length<=800&&!hasNested&&childCount<=8)return current;
       current=current.parentElement;
     }
-    return isSafeModalTextTarget(el)?el:null;
+    return null;
   }
   function applyModalDirection(target){
     if(!isSafeModalTextTarget(target))return;
@@ -492,6 +535,7 @@ $SMART_JS = @'
     "[data-testid*=\"title\"]","[data-testid*=\"label\"]","[data-testid*=\"description\"]","[data-testid*=\"question\"]","[data-testid*=\"option\"]",
     "div","span"
   ].join(",");
+  var MODAL_FOOTER_RE=/^(Submit answers|Esc to cancel)$/i;
   function processModal(modal){
     if(!isVisible(modal))return;
     var all=modal.textContent?modal.textContent.length:0;
@@ -502,6 +546,8 @@ $SMART_JS = @'
       var key=el.textContent?el.textContent.length:0;
       if(el.__srtlm===key)continue;
       el.__srtlm=key;
+      // Leave footer controls (Submit answers / Esc to cancel) untouched.
+      if(MODAL_FOOTER_RE.test((el.textContent||"").trim()))continue;
       var t=findModalTextOwner(el);
       if(t)applyModalDirection(t);
     }
@@ -510,14 +556,12 @@ $SMART_JS = @'
     root=root||document;
     try{
       if(root.nodeType!==1&&root.nodeType!==9)return;
-      var modals=[];
+      var modals=getQuestionModalRoots(root);
+      // Also handle the case where the changed node is INSIDE a standard dialog.
       if(root.nodeType===1){
-        if(root.matches&&root.matches(MODAL_ROOT_SEL))modals.push(root);
         var anc=root.closest?root.closest(MODAL_ROOT_SEL):null;
         if(anc&&modals.indexOf(anc)===-1)modals.push(anc);
       }
-      var found=root.querySelectorAll(MODAL_ROOT_SEL);
-      for(var i=0;i<found.length;i++)if(modals.indexOf(found[i])===-1)modals.push(found[i]);
       for(var j=0;j<modals.length;j++)processModal(modals[j]);
     }catch(e){}
   }
