@@ -76,7 +76,7 @@ $SMART_JS = @'
   function shouldSkipDirectionFix(el){
     if(!el||!(el instanceof HTMLElement))return true;
     if(!isVisible(el))return true;
-    return !!el.closest('pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [class*="mirror"], [class*="Mirror"]');
+    return !!el.closest('pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [class*="mirror"], [class*="Mirror"], svg, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="loadingState"], [class*="empty"], [class*="pictogram"]');
   }
   function isSafeDirectionTarget(el){
     if(!el||!(el instanceof HTMLElement))return false;
@@ -119,57 +119,64 @@ $SMART_JS = @'
     var text=(target.textContent||"").trim();
     if(!text)return;
     var dir=detectSmartDirection(text);
-    var align=dir==="rtl"?"right":"left";
-    target.setAttribute("dir",dir);
-    target.style.setProperty("direction",dir,"important");
-    target.style.setProperty("text-align",align,"important");
+    if(dir!=="rtl"){
+      // LTR is the app default - do NOT override alignment, so centered spinners,
+      // loaders and English UI are left exactly as the app draws them. Only undo a
+      // prior RTL if this element had flipped before.
+      if(target.classList.contains("smart-rtl")){
+        target.classList.remove("smart-rtl");
+        target.removeAttribute("dir");
+        target.style.removeProperty("direction");
+        target.style.removeProperty("text-align");
+        target.style.removeProperty("width");
+      }
+      return;
+    }
+    target.setAttribute("dir","rtl");
+    target.style.setProperty("direction","rtl","important");
+    target.style.setProperty("text-align","right","important");
     target.style.setProperty("unicode-bidi","plaintext","important");
-    // Wrap inside the visible area; never stretch past it (this is what fixes the
-    // RTL horizontal overflow/clipping). min-width:0 lets flex children shrink.
+    // Wrap inside the visible area; never stretch past it (fixes RTL overflow).
     target.style.setProperty("box-sizing","border-box","important");
     target.style.setProperty("max-width","100%","important");
     target.style.setProperty("min-width","0","important");
     target.style.setProperty("white-space","normal","important");
     target.style.setProperty("overflow-wrap","anywhere","important");
     target.style.setProperty("word-break","normal","important");
-    if(dir==="rtl")target.style.setProperty("width","auto","important");
-    target.classList.toggle("smart-rtl",dir==="rtl");
-    target.classList.toggle("smart-ltr",dir==="ltr");
+    target.style.setProperty("width","auto","important");
+    target.classList.add("smart-rtl");
   }
   var RENDERED_SEL=[
     ".markdown p",".markdown li",".markdown blockquote",".markdown h1",".markdown h2",".markdown h3",".markdown h4",".markdown h5",".markdown h6",
     ".rendered-markdown p",".rendered-markdown li",".rendered-markdown blockquote",".rendered-markdown h1",".rendered-markdown h2",".rendered-markdown h3",".rendered-markdown h4",".rendered-markdown h5",".rendered-markdown h6",
     "h1","h2","h3","h4","h5","h6","[role=\"heading\"]","summary",
-    "[class*=\"title\"]","[class*=\"heading\"]","[class*=\"header\"]","[class*=\"label\"]","[data-testid*=\"title\"]","[data-testid*=\"heading\"]","[data-testid*=\"label\"]",
+    "[class*=\"title\"]","[class*=\"heading\"]","[data-testid*=\"title\"]","[data-testid*=\"heading\"]",
     "[data-testid*=\"message\"] p","[data-testid*=\"message\"] li","[data-testid*=\"message\"] div","[data-testid*=\"message\"] span",
     "[class*=\"message\"] p","[class*=\"message\"] li","[class*=\"message\"] div","[class*=\"message\"] span",
     "[class*=\"userMessage_\"]",
     "[class*=\"thinking\"]","[class*=\"status\"]","[data-testid*=\"thinking\"]","[data-testid*=\"status\"]"
   ].join(",");
+  // Process-once: skip an element whose text length is unchanged since last pass,
+  // so streaming re-styles only what actually grew (no full-document re-scan).
+  function processRendered(el){
+    var key=el.textContent?el.textContent.length:0;
+    if(el.__srtl===key)return;
+    el.__srtl=key;
+    var t=findBlockOwner(el);
+    if(t)applyRenderedDirectionToTarget(t);
+  }
   function applySmartDirectionToRenderedText(root){
     root=root||document;
     try{
+      // The root itself (e.g. the <p>/<span> whose text just streamed in) plus
+      // descendants. findBlockOwner resolves the real block even from a span.
+      if(root.nodeType===1)processRendered(root);
       var nodes=(root.nodeType===1||root.nodeType===9)?root.querySelectorAll(RENDERED_SEL):[];
-      for(var i=0;i<nodes.length;i++){var t=findBlockOwner(nodes[i]);if(t)applyRenderedDirectionToTarget(t);}
-    }catch(e){}
-    // Fallback: every visible Persian text node -> nearest safe block owner.
-    try{
-      if(!(root.nodeType===1||root.nodeType===9))return;
-      var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:function(node){
-        var v=node.nodeValue||"";
-        if(!v.trim())return NodeFilter.FILTER_REJECT;
-        if(!containsRtl(v))return NodeFilter.FILTER_REJECT;
-        var parent=node.parentElement;
-        if(!parent||shouldSkipDirectionFix(parent))return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      }});
-      var targets=[];
-      while(walker.nextNode()){var owner=findBlockOwner(walker.currentNode.parentElement);if(owner&&targets.indexOf(owner)===-1)targets.push(owner);}
-      for(var j=0;j<targets.length;j++)applyRenderedDirectionToTarget(targets[j]);
+      for(var i=0;i<nodes.length;i++)processRendered(nodes[i]);
     }catch(e){}
   }
-  // Coalesced multi-pass: re-run a few times so late insertions are caught, but a
-  // burst of mutations schedules only one batch (avoids setTimeout pile-up).
+  // One coalesced pass per burst (process-once keeps document passes cheap) plus a
+  // single short follow-up for late insertions.
   function runDirectionPasses(){
     applySmartDirectionToRenderedText(document);
     applySmartDirectionToHeaderTitles(document);
@@ -179,9 +186,7 @@ $SMART_JS = @'
     if(_passPending)return;
     _passPending=true;
     try{if(window.requestAnimationFrame)window.requestAnimationFrame(runDirectionPasses);}catch(e){}
-    setTimeout(runDirectionPasses,50);
-    setTimeout(runDirectionPasses,250);
-    setTimeout(function(){runDirectionPasses();_passPending=false;},750);
+    setTimeout(function(){runDirectionPasses();_passPending=false;},200);
   }
   // ---- Composer: style BOTH the editable (caret) and its mirror (text) ----
   // Real DOM (Claude Code webview): div.messageInputContainer >
@@ -322,7 +327,7 @@ $SMART_JS = @'
   function shouldSkipHeaderTextFix(el){
     if(!el||!(el instanceof HTMLElement))return true;
     if(!isVisible(el))return true;
-    return !!el.closest('button, [role="button"], svg, pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff');
+    return !!el.closest('button, [role="button"], svg, pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="empty"], [class*="pictogram"]');
   }
   function isSafeHeaderTitleTarget(el){
     if(!el||!(el instanceof HTMLElement))return false;
@@ -352,16 +357,26 @@ $SMART_JS = @'
     var text=(target.textContent||"").trim();
     if(!text)return;
     var dir=detectSmartDirection(text);
-    var align=dir==="rtl"?"right":"left";
-    target.setAttribute("dir",dir);
-    target.style.setProperty("direction",dir,"important");
-    target.style.setProperty("text-align",align,"important");
+    if(dir!=="rtl"){
+      // Leave English/LTR header titles exactly as the app lays them out.
+      if(target.classList.contains("smart-header-rtl")){
+        target.classList.remove("smart-header-rtl");
+        target.removeAttribute("dir");
+        target.style.removeProperty("direction");
+        target.style.removeProperty("text-align");
+        target.style.removeProperty("margin-inline-start");
+        target.style.removeProperty("margin-inline-end");
+      }
+      return;
+    }
+    target.setAttribute("dir","rtl");
+    target.style.setProperty("direction","rtl","important");
+    target.style.setProperty("text-align","right","important");
     target.style.setProperty("unicode-bidi","plaintext","important");
-    target.classList.toggle("smart-header-rtl",dir==="rtl");
-    target.classList.toggle("smart-header-ltr",dir==="ltr");
+    target.classList.add("smart-header-rtl");
     // Shift only the title text within its flex/grid row (toolbar buttons stay).
-    if(dir==="rtl"){target.style.setProperty("margin-inline-start","auto","important");target.style.setProperty("margin-inline-end","0","important");}
-    else{target.style.setProperty("margin-inline-start","0","important");target.style.setProperty("margin-inline-end","auto","important");}
+    target.style.setProperty("margin-inline-start","auto","important");
+    target.style.setProperty("margin-inline-end","0","important");
     // Bounded width (room for toolbar buttons) + wrap so long titles never clip.
     target.style.setProperty("box-sizing","border-box","important");
     target.style.setProperty("max-width","calc(100% - 96px)","important");
@@ -374,26 +389,20 @@ $SMART_JS = @'
     "[class*=\"header\"] h1","[class*=\"header\"] h2","[class*=\"header\"] h3","[class*=\"header\"] [role=\"heading\"]","[class*=\"header\"] [class*=\"title\"]","[class*=\"header\"] [data-testid*=\"title\"]",
     "[class*=\"top\"] [class*=\"title\"]","[class*=\"top\"] [role=\"heading\"]","[data-testid*=\"header\"] [data-testid*=\"title\"]","[data-testid*=\"top\"] [data-testid*=\"title\"]"
   ].join(",");
+  // Process-once + no full-document text-node walk (the old getBoundingClientRect
+  // walk per text node was a big part of the hang).
   function applySmartDirectionToHeaderTitles(root){
     root=root||document;
     try{
       var nodes=(root.nodeType===1||root.nodeType===9)?root.querySelectorAll(HEADER_SEL):[];
-      for(var i=0;i<nodes.length;i++){var t=findHeaderTitleOwner(nodes[i]);if(t)applyHeaderTitleDirection(t);}
-    }catch(e){}
-    // Fallback: short visible text nodes near the top of the viewport.
-    try{
-      if(!(root.nodeType===1||root.nodeType===9))return;
-      var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:function(node){
-        var v=node.nodeValue||"";
-        if(!v.trim()||v.trim().length>180)return NodeFilter.FILTER_REJECT;
-        var parent=node.parentElement;
-        if(!parent||shouldSkipHeaderTextFix(parent))return NodeFilter.FILTER_REJECT;
-        if(parent.getBoundingClientRect().top>140)return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      }});
-      var targets=[];
-      while(walker.nextNode()){var owner=findHeaderTitleOwner(walker.currentNode.parentElement);if(owner&&targets.indexOf(owner)===-1)targets.push(owner);}
-      for(var j=0;j<targets.length;j++)applyHeaderTitleDirection(targets[j]);
+      for(var i=0;i<nodes.length;i++){
+        var el=nodes[i];
+        var key=el.textContent?el.textContent.length:0;
+        if(el.__srtlh===key)continue;
+        el.__srtlh=key;
+        var t=findHeaderTitleOwner(el);
+        if(t)applyHeaderTitleDirection(t);
+      }
     }catch(e){}
   }
   function start(){
@@ -406,27 +415,43 @@ $SMART_JS = @'
     document.addEventListener("compositionupdate",composerHandler(true),true);
     document.addEventListener("compositionend",composerHandler(false),true);
     document.addEventListener("focusin",composerHandler(false),true);
-    // After submit/send, the prompt bubble is rendered in a new element.
+    // Belt-and-suspenders for prompt submit (the new bubble also arrives via the
+    // observer below). Light, because the passes are process-once.
     document.addEventListener("submit",scheduleSmartDirectionPass,true);
     document.addEventListener("keydown",function(e){if(e.key==="Enter")scheduleSmartDirectionPass();},true);
-    document.addEventListener("click",scheduleSmartDirectionPass,true);
+    // rAF-coalesced: process ONLY the changed subtrees once per frame. This is the
+    // core perf fix - streaming no longer triggers full-document re-scans.
+    var queued=[],flushScheduled=false;
+    function flush(){
+      flushScheduled=false;
+      var roots=queued;queued=[];var seen=[];
+      for(var i=0;i<roots.length;i++){
+        var r=roots[i];
+        if(!r||r.nodeType!==1||seen.indexOf(r)!==-1)continue;
+        seen.push(r);
+        applySmartDirectionToRenderedText(r);
+        applySmartDirectionToHeaderTitles(r);
+      }
+      updateComposerDirection("");
+    }
+    function enqueue(node){
+      if(!node||node.nodeType!==1)return;
+      queued.push(node);
+      if(flushScheduled)return;
+      flushScheduled=true;
+      try{if(window.requestAnimationFrame)window.requestAnimationFrame(flush);else setTimeout(flush,16);}catch(e){setTimeout(flush,16);}
+    }
     try{
       new MutationObserver(function(mutations){
-        var sawChildList=false;
         for(var m=0;m<mutations.length;m++){
           var mu=mutations[m];
           if(mu.type==="childList"){
-            sawChildList=true;
-            for(var n=0;n<mu.addedNodes.length;n++){
-              var node=mu.addedNodes[n];
-              if(node.nodeType===1){applySmartDirectionToRenderedText(node);applySmartDirectionToHeaderTitles(node);}
-            }
+            for(var n=0;n<mu.addedNodes.length;n++){if(mu.addedNodes[n].nodeType===1)enqueue(mu.addedNodes[n]);}
           }else if(mu.type==="characterData"){
-            // Text inserted into an existing node: coalesced full re-pass.
-            scheduleSmartDirectionPass();
+            var tp=mu.target&&mu.target.parentElement;
+            if(tp)enqueue(tp);
           }
         }
-        if(sawChildList)updateComposerDirection("");
       }).observe(document.body,{childList:true,subtree:true,characterData:true});
     }catch(e){}
   }
