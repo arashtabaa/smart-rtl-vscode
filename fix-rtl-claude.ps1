@@ -83,7 +83,9 @@ $SMART_JS = @'
     if(shouldSkipDirectionFix(el))return false;
     var text=(el.textContent||"").trim();
     if(!text||text.length>2500)return false;
-    if(el.querySelector('pre, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor'))return false;
+    // A row that contains a spinner/icon/button is a status/toolbar row, not a pure
+    // text block - directing it flips the icon/spinner (the thinking indicator bug).
+    if(el.querySelector('pre, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, svg, button, [role="button"], [class*="spinner"], [class*="Spinner"]'))return false;
     return true;
   }
   function findNearestMessageRoot(el){
@@ -409,9 +411,9 @@ $SMART_JS = @'
     applySmartDirectionToRenderedText(document);
     applySmartDirectionToHeaderTitles(document);
     updateComposerDirection("");
-    document.addEventListener("beforeinput",composerHandler(true),true);
+    // input + composition cover typing; keyup/beforeinput were redundant (two calls
+    // per keystroke) and contributed to the typing lag.
     document.addEventListener("input",composerHandler(false),true);
-    document.addEventListener("keyup",composerHandler(false),true);
     document.addEventListener("compositionupdate",composerHandler(true),true);
     document.addEventListener("compositionend",composerHandler(false),true);
     document.addEventListener("focusin",composerHandler(false),true);
@@ -419,12 +421,15 @@ $SMART_JS = @'
     // observer below). Light, because the passes are process-once.
     document.addEventListener("submit",scheduleSmartDirectionPass,true);
     document.addEventListener("keydown",function(e){if(e.key==="Enter")scheduleSmartDirectionPass();},true);
-    // rAF-coalesced: process ONLY the changed subtrees once per frame. This is the
-    // core perf fix - streaming no longer triggers full-document re-scans.
-    var queued=[],flushScheduled=false;
+    // Mutations inside the composer/editor are handled by the composer listeners
+    // above; the rendered/header passes must NOT scan that subtree on every
+    // keystroke (the composer class contains "message"), or typing lags.
+    var COMPOSER_SKIP='[contenteditable], [role="textbox"], textarea, input, .cm-editor, .monaco-editor, [class*="messageInput"], [class*="mentionMirror"], [class*="mirror"], [class*="Mirror"]';
+    // rAF-coalesced: process ONLY the changed (non-composer) subtrees once/frame.
+    var queued=[],flushScheduled=false,sawNonComposer=false;
     function flush(){
       flushScheduled=false;
-      var roots=queued;queued=[];var seen=[];
+      var roots=queued;queued=[];var seen=[],didWork=sawNonComposer;sawNonComposer=false;
       for(var i=0;i<roots.length;i++){
         var r=roots[i];
         if(!r||r.nodeType!==1||seen.indexOf(r)!==-1)continue;
@@ -432,10 +437,12 @@ $SMART_JS = @'
         applySmartDirectionToRenderedText(r);
         applySmartDirectionToHeaderTitles(r);
       }
-      updateComposerDirection("");
+      if(didWork)updateComposerDirection("");
     }
     function enqueue(node){
       if(!node||node.nodeType!==1)return;
+      if(node.closest&&node.closest(COMPOSER_SKIP))return; // composer handles itself
+      sawNonComposer=true;
       queued.push(node);
       if(flushScheduled)return;
       flushScheduled=true;
