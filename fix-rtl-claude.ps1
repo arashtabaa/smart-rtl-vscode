@@ -52,6 +52,10 @@ button,[role="button"],svg{unicode-bidi:normal}
 .smart-rtl:is(h1,h2,h3,h4,h5,h6),.smart-ltr:is(h1,h2,h3,h4,h5,h6),.smart-header-rtl,.smart-header-ltr{width:auto !important;max-width:100% !important;min-width:0 !important}
 /* Let the nearest message/status text container shrink and wrap in flex rows */
 [class*="message"],[data-testid*="message"],[class*="thinking"],[data-testid*="thinking"],[class*="status"],[data-testid*="status"]{min-width:0 !important;max-width:100% !important}
+/* Question / choice modals & dialogs */
+.smart-modal-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
+.smart-modal-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
+[role="dialog"] button:has(svg),[aria-modal="true"] button:has(svg){direction:ltr !important;text-align:center !important}
 .composer-smart-rtl{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-rtl>p,.composer-smart-rtl>div{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
@@ -182,6 +186,7 @@ $SMART_JS = @'
   function runDirectionPasses(){
     applySmartDirectionToRenderedText(document);
     applySmartDirectionToHeaderTitles(document);
+    applySmartDirectionToModals(document);
   }
   var _passPending=false;
   function scheduleSmartDirectionPass(){
@@ -218,7 +223,7 @@ $SMART_JS = @'
     var t=(token||"").trim();
     if(!t)return true;
     if(isAllNeutral(t))return true;
-    return (/^https?:\/\//i.test(t)||/^[.\/\\~]/.test(t)||/[.\/\\]/.test(t)||/\.[A-Za-z0-9]{1,12}$/.test(t)||/^[?$@#]/.test(t)||/[?=&]/.test(t)||/[_\/\\.-]/.test(t)||/\d/.test(t)||/^[A-Z0-9_.\/\\-]+$/.test(t)||/^(git|npm|pnpm|yarn|node|php|js|ts|css|html|json|md|feat|fix|chore|refactor|feature|bugfix|hotfix|branch|commit|tag|powershell|bash|cmd|remote|fork|push|pr|classic|fine-grained|delete|claude|vscode|rtl)$/i.test(t));
+    return (/^https?:\/\//i.test(t)||/^[.\/\\~]/.test(t)||/[.\/\\]/.test(t)||/\.[A-Za-z0-9]{1,12}$/.test(t)||/^[?$@#]/.test(t)||/[?=&]/.test(t)||/[_\/\\.-]/.test(t)||/\d/.test(t)||/^[A-Z0-9_.\/\\-]+$/.test(t)||/^(git|npm|pnpm|yarn|node|php|js|ts|css|html|json|md|feat|fix|chore|refactor|feature|bugfix|hotfix|branch|commit|tag|powershell|bash|cmd|remote|fork|push|pr|classic|fine-grained|delete|claude|vscode|rtl|blog|our|story|home|store|other)$/i.test(t));
   }
   // Pure-Persian -> rtl, pure-Latin -> ltr. Mixed: skip leading neutrals/emoji to
   // the first strong char; else fall back to the first strong NON-technical token,
@@ -407,9 +412,119 @@ $SMART_JS = @'
       }
     }catch(e){}
   }
+  // ---- Question / choice modals & dialogs ----
+  // Reuses detectSmartDirection/isVisible. Styles meaningful-text choices (which may
+  // be <button>/role=option) but skips icon-only controls (close, etc). Integrated
+  // into the SAME rAF observer below - no extra observer, so no streaming hang.
+  var MODAL_ROOT_SEL='[role="dialog"], [aria-modal="true"], [class*="modal"], [class*="Modal"], [class*="dialog"], [class*="Dialog"], [class*="popover"], [class*="Popover"], [data-testid*="modal"], [data-testid*="dialog"]';
+  function hasMeaningfulText(el){
+    var t=(el.textContent||"").trim();
+    return t.length>0&&/[\p{L}\p{N}]/u.test(t);
+  }
+  function isIconOnlyControl(el){
+    if(!el||!(el instanceof HTMLElement))return false;
+    var t=(el.textContent||"").trim();
+    return !!el.querySelector("svg")&&t.length<=2;
+  }
+  function shouldSkipModalTextFix(el){
+    if(!el||!(el instanceof HTMLElement))return true;
+    if(!isVisible(el))return true;
+    if(!hasMeaningfulText(el))return true;
+    if(isIconOnlyControl(el))return true;
+    return !!el.closest('pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff');
+  }
+  function isSafeModalTextTarget(el){
+    if(!el||!(el instanceof HTMLElement))return false;
+    if(shouldSkipModalTextFix(el))return false;
+    var text=(el.textContent||"").trim();
+    if(!text||text.length>1200)return false;
+    if(el.querySelector('pre, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor'))return false;
+    return true;
+  }
+  var MODAL_BLOCK_TAGS={p:1,li:1,label:1,legend:1,h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,summary:1,figcaption:1};
+  function findModalTextOwner(el){
+    if(!el||!(el instanceof HTMLElement))return null;
+    var current=el;
+    for(var depth=0;current&&depth<6;depth++){
+      if(!(current instanceof HTMLElement))break;
+      if(!isSafeModalTextTarget(current)){current=current.parentElement;continue;}
+      var tag=current.tagName.toLowerCase();
+      if(MODAL_BLOCK_TAGS[tag])return current;
+      var role=current.getAttribute("role");
+      if(role==="heading"||role==="option"||role==="radio"||role==="menuitemradio"||current.matches('[class*="title"], [class*="heading"], [class*="label"], [class*="description"], [data-testid*="title"], [data-testid*="label"], [data-testid*="description"]'))return current;
+      var style=window.getComputedStyle(current);
+      var text=(current.textContent||"").trim();
+      var hasNested=current.querySelector("p, li, label, h1, h2, h3, h4, h5, h6, pre");
+      var childCount=Array.prototype.slice.call(current.children||[]).filter(isVisible).length;
+      if((style.display==="block"||style.display==="flex"||style.display==="grid"||style.display==="list-item")&&text.length<=600&&!hasNested&&childCount<=8)return current;
+      current=current.parentElement;
+    }
+    return isSafeModalTextTarget(el)?el:null;
+  }
+  function applyModalDirection(target){
+    if(!isSafeModalTextTarget(target))return;
+    var text=(target.textContent||"").trim();
+    if(!text)return;
+    var dir=detectSmartDirection(text);
+    if(dir!=="rtl"){
+      if(target.classList.contains("smart-modal-rtl")){
+        target.classList.remove("smart-modal-rtl");
+        target.removeAttribute("dir");
+        target.style.removeProperty("direction");
+        target.style.removeProperty("text-align");
+      }
+      return;
+    }
+    target.setAttribute("dir","rtl");
+    target.style.setProperty("direction","rtl","important");
+    target.style.setProperty("text-align","right","important");
+    target.style.setProperty("unicode-bidi","plaintext","important");
+    target.style.setProperty("min-width","0","important");
+    target.style.setProperty("max-width","100%","important");
+    target.style.setProperty("white-space","normal","important");
+    target.style.setProperty("overflow-wrap","anywhere","important");
+    target.classList.add("smart-modal-rtl");
+  }
+  var MODAL_SEL=[
+    "h1","h2","h3","h4","h5","h6","p","li","label","legend",
+    "[role=\"heading\"]","[role=\"option\"]","[role=\"radio\"]","[role=\"menuitemradio\"]","button",
+    "[class*=\"title\"]","[class*=\"heading\"]","[class*=\"label\"]","[class*=\"description\"]","[class*=\"question\"]","[class*=\"answer\"]","[class*=\"option\"]",
+    "[data-testid*=\"title\"]","[data-testid*=\"label\"]","[data-testid*=\"description\"]","[data-testid*=\"question\"]","[data-testid*=\"option\"]",
+    "div","span"
+  ].join(",");
+  function processModal(modal){
+    if(!isVisible(modal))return;
+    var all=modal.textContent?modal.textContent.length:0;
+    if(all>6000)return; // not a focused choice dialog - avoid scanning huge trees
+    var els=modal.querySelectorAll(MODAL_SEL);
+    for(var i=0;i<els.length;i++){
+      var el=els[i];
+      var key=el.textContent?el.textContent.length:0;
+      if(el.__srtlm===key)continue;
+      el.__srtlm=key;
+      var t=findModalTextOwner(el);
+      if(t)applyModalDirection(t);
+    }
+  }
+  function applySmartDirectionToModals(root){
+    root=root||document;
+    try{
+      if(root.nodeType!==1&&root.nodeType!==9)return;
+      var modals=[];
+      if(root.nodeType===1){
+        if(root.matches&&root.matches(MODAL_ROOT_SEL))modals.push(root);
+        var anc=root.closest?root.closest(MODAL_ROOT_SEL):null;
+        if(anc&&modals.indexOf(anc)===-1)modals.push(anc);
+      }
+      var found=root.querySelectorAll(MODAL_ROOT_SEL);
+      for(var i=0;i<found.length;i++)if(modals.indexOf(found[i])===-1)modals.push(found[i]);
+      for(var j=0;j<modals.length;j++)processModal(modals[j]);
+    }catch(e){}
+  }
   function start(){
     applySmartDirectionToRenderedText(document);
     applySmartDirectionToHeaderTitles(document);
+    applySmartDirectionToModals(document);
     updateComposerDirection("");
     // input + composition cover typing; keyup/beforeinput were redundant (two calls
     // per keystroke) and contributed to the typing lag.
@@ -436,6 +551,7 @@ $SMART_JS = @'
         seen.push(r);
         applySmartDirectionToRenderedText(r);
         applySmartDirectionToHeaderTitles(r);
+        applySmartDirectionToModals(r);
       }
       if(didWork)updateComposerDirection("");
     }
