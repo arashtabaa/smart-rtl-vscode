@@ -1,4 +1,4 @@
-﻿# Smart Auto-Direction Fix for Claude Code Extension
+# Smart Auto-Direction Fix for Claude Code Extension
 # Supports: VSCode, Cursor, Windsurf, Windsurf Next
 # Works on: Windows
 #
@@ -60,6 +60,11 @@ button:has(svg):not(.smart-modal-rtl):not(.smart-modal-ltr){direction:ltr !impor
 .smart-md-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
 .smart-md-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
 .markdown pre,.markdown pre *,[class*="markdown"] pre,[class*="markdown"] pre *,.smart-md-rtl pre,.smart-md-rtl pre *,.smart-md-ltr pre,.smart-md-ltr pre *{direction:ltr !important;text-align:left !important;unicode-bidi:normal !important;white-space:pre !important;overflow-wrap:normal !important}
+/* Markdown shown inside a pre/code block, split into per-line spans */
+.smart-md-code-block{display:block !important;direction:ltr !important;text-align:left !important;unicode-bidi:normal !important;white-space:pre-wrap !important;max-width:100% !important;min-width:0 !important;overflow-x:auto !important}
+.smart-md-code-line{display:block !important;box-sizing:border-box !important;width:100% !important;max-width:100% !important;min-width:0 !important}
+.smart-md-code-line-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important;white-space:pre-wrap !important;overflow-wrap:anywhere !important}
+.smart-md-code-line-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:normal !important;white-space:pre-wrap !important;overflow-wrap:normal !important}
 .composer-smart-rtl{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-rtl>p,.composer-smart-rtl>div{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
@@ -192,6 +197,7 @@ $SMART_JS = @'
     applySmartDirectionToHeaderTitles(document);
     applySmartDirectionToModals(document);
     applySmartDirectionToMarkdown(document);
+    applySmartDirectionToMarkdownCodeBlocks(document);
   }
   var _passPending=false;
   function scheduleSmartDirectionPass(){
@@ -653,11 +659,90 @@ $SMART_JS = @'
       applySmartDirectionToRawMarkdownLines(root);
     }catch(e){}
   }
+  // ---- Markdown shown INSIDE a pre/code block (split into per-line spans) ----
+  // VERY narrow: only blocks that are clearly Markdown AND contain Persian get
+  // rewritten line-by-line; internal ``` fences keep their lines LTR. Normal code
+  // (PowerShell/JS/JSON/diff) is never touched. Per-line direction is set INLINE
+  // with !important so it beats the existing `pre *{direction:ltr}` rule.
+  function looksLikeMarkdownCodeBlock(el){
+    if(!el||!(el instanceof HTMLElement))return false;
+    var text=el.textContent||"";
+    if(!text.trim()||!containsRtl(text))return false; // must contain Persian/Arabic
+    var cn=String(el.className||"").toLowerCase();
+    var dl=String(el.getAttribute("data-language")||"").toLowerCase();
+    var lg=String(el.getAttribute("lang")||"").toLowerCase();
+    if(cn.indexOf("language-md")>=0||cn.indexOf("language-markdown")>=0||cn.indexOf("markdown")>=0||dl==="md"||dl==="markdown"||lg==="md"||lg==="markdown")return true;
+    var sigs=[/^#{1,6}\s+/m,/^```/m,/^\s*[-*+]\s+/m,/^\s*\d+[.)]\s+/m,/\[[^\]]+\]\([^)]+\)/,/`[^`]+`/,/\*\*[^*]+\*\*/];
+    var n=0;for(var i=0;i<sigs.length;i++)if(sigs[i].test(text))n++;
+    return n>=2;
+  }
+  function isFenceLine(text){return /^\s*```/.test(String(text||"").trim());}
+  function createSmartMarkdownLine(lineText,inFence){
+    var line=document.createElement("span");
+    line.className="smart-md-code-line";
+    line.textContent=lineText||" ";
+    if(inFence||isFenceLine(lineText)){
+      line.setAttribute("dir","ltr");
+      line.classList.add("smart-md-code-line-ltr");
+      line.style.setProperty("direction","ltr","important");
+      line.style.setProperty("text-align","left","important");
+      line.style.setProperty("unicode-bidi","normal","important");
+      line.style.setProperty("white-space","pre-wrap","important");
+      line.style.setProperty("overflow-wrap","normal","important");
+      return line;
+    }
+    var dir=detectSmartDirection(lineText);
+    line.setAttribute("dir",dir);
+    line.classList.add(dir==="rtl"?"smart-md-code-line-rtl":"smart-md-code-line-ltr");
+    line.style.setProperty("direction",dir,"important");
+    line.style.setProperty("text-align",dir==="rtl"?"right":"left","important");
+    line.style.setProperty("unicode-bidi","plaintext","important");
+    line.style.setProperty("white-space","pre-wrap","important");
+    line.style.setProperty("overflow-wrap","anywhere","important");
+    return line;
+  }
+  function smartifyMarkdownCodeBlock(codeEl){
+    if(!codeEl||!(codeEl instanceof HTMLElement))return;
+    // Already transformed and still intact -> skip (prevents a rewrite loop).
+    if(codeEl.getAttribute("data-smart-md-code")==="1"&&codeEl.querySelector(".smart-md-code-line"))return;
+    if(!looksLikeMarkdownCodeBlock(codeEl))return;
+    var originalText=codeEl.textContent||"";
+    if(!originalText.trim())return;
+    codeEl.setAttribute("data-smart-md-code","1");
+    codeEl.classList.add("smart-md-code-block");
+    codeEl.setAttribute("dir","ltr");
+    codeEl.style.setProperty("direction","ltr","important");
+    codeEl.style.setProperty("text-align","left","important");
+    codeEl.style.setProperty("unicode-bidi","normal","important");
+    codeEl.style.setProperty("white-space","pre-wrap","important");
+    var lines=originalText.split("\n"),frag=document.createDocumentFragment(),inFence=false;
+    for(var i=0;i<lines.length;i++){
+      var rawLine=lines[i];
+      if(isFenceLine(rawLine.trim())){
+        frag.appendChild(createSmartMarkdownLine(rawLine,true));
+        frag.appendChild(document.createTextNode("\n"));
+        inFence=!inFence;continue;
+      }
+      frag.appendChild(createSmartMarkdownLine(rawLine,inFence));
+      frag.appendChild(document.createTextNode("\n"));
+    }
+    try{codeEl.replaceChildren(frag);}catch(e){}
+  }
+  function applySmartDirectionToMarkdownCodeBlocks(root){
+    root=root||document;
+    try{
+      if(root.nodeType!==1&&root.nodeType!==9)return;
+      if(root.nodeType===1&&root.matches&&root.matches("pre > code, pre code"))smartifyMarkdownCodeBlock(root);
+      var blocks=root.querySelectorAll("pre > code, pre code");
+      for(var i=0;i<blocks.length;i++)smartifyMarkdownCodeBlock(blocks[i]);
+    }catch(e){}
+  }
   function start(){
     applySmartDirectionToRenderedText(document);
     applySmartDirectionToHeaderTitles(document);
     applySmartDirectionToModals(document);
     applySmartDirectionToMarkdown(document);
+    applySmartDirectionToMarkdownCodeBlocks(document);
     updateComposerDirection("");
     // input + composition cover typing; keyup/beforeinput were redundant (two calls
     // per keystroke) and contributed to the typing lag.
@@ -686,6 +771,7 @@ $SMART_JS = @'
         applySmartDirectionToHeaderTitles(r);
         applySmartDirectionToModals(r);
         applySmartDirectionToMarkdown(r);
+        applySmartDirectionToMarkdownCodeBlocks(r);
       }
       if(didWork)updateComposerDirection("");
     }
