@@ -56,6 +56,10 @@ button,[role="button"],svg{unicode-bidi:normal}
 .smart-modal-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
 .smart-modal-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
 button:has(svg):not(.smart-modal-rtl):not(.smart-modal-ltr){direction:ltr !important;text-align:center !important}
+/* Markdown content (rendered + raw source lines) */
+.smart-md-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
+.smart-md-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
+.markdown pre,.markdown pre *,[class*="markdown"] pre,[class*="markdown"] pre *,.smart-md-rtl pre,.smart-md-rtl pre *,.smart-md-ltr pre,.smart-md-ltr pre *{direction:ltr !important;text-align:left !important;unicode-bidi:normal !important;white-space:pre !important;overflow-wrap:normal !important}
 .composer-smart-rtl{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-rtl>p,.composer-smart-rtl>div{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
@@ -187,6 +191,7 @@ $SMART_JS = @'
     applySmartDirectionToRenderedText(document);
     applySmartDirectionToHeaderTitles(document);
     applySmartDirectionToModals(document);
+    applySmartDirectionToMarkdown(document);
   }
   var _passPending=false;
   function scheduleSmartDirectionPass(){
@@ -565,10 +570,94 @@ $SMART_JS = @'
       for(var j=0;j<modals.length;j++)processModal(modals[j]);
     }catch(e){}
   }
+  // ---- Markdown content (rendered blocks + raw source lines) ----
+  // Reuses detectSmartDirection. Persian prose/headings/lists/quotes -> RTL; fenced
+  // code stays LTR. Only affects markdown rendered INSIDE the Claude webview (not the
+  // VSCode editor / built-in preview, which are separate webviews). Same rAF observer.
+  function shouldSkipMarkdownBlock(el){
+    return !!el.closest('pre, code, kbd, samp, .diff, .cm-editor:not([data-language="markdown"]), .monaco-editor:not([data-language="markdown"])');
+  }
+  function applyDirectionToMarkdownBlock(el){
+    if(!el||!(el instanceof HTMLElement))return;
+    if(shouldSkipMarkdownBlock(el))return;
+    if(!isVisible(el))return;
+    var text=(el.textContent||"").trim();
+    if(!text||text.length>2000)return;
+    var dir=detectSmartDirection(text);
+    if(dir!=="rtl"){
+      if(el.classList.contains("smart-md-rtl")){el.classList.remove("smart-md-rtl");el.removeAttribute("dir");el.style.removeProperty("direction");el.style.removeProperty("text-align");}
+      return;
+    }
+    el.setAttribute("dir","rtl");
+    el.style.setProperty("direction","rtl","important");
+    el.style.setProperty("text-align","right","important");
+    el.style.setProperty("unicode-bidi","plaintext","important");
+    el.style.setProperty("min-width","0","important");
+    el.style.setProperty("max-width","100%","important");
+    el.style.setProperty("white-space","normal","important");
+    el.style.setProperty("overflow-wrap","anywhere","important");
+    el.classList.add("smart-md-rtl");
+  }
+  var MD_SEL=[
+    ".markdown h1",".markdown h2",".markdown h3",".markdown h4",".markdown h5",".markdown h6",".markdown p",".markdown li",".markdown blockquote",
+    "[class*=\"markdown\"] h1","[class*=\"markdown\"] h2","[class*=\"markdown\"] h3","[class*=\"markdown\"] h4","[class*=\"markdown\"] h5","[class*=\"markdown\"] h6","[class*=\"markdown\"] p","[class*=\"markdown\"] li","[class*=\"markdown\"] blockquote",
+    "[data-testid*=\"markdown\"] h1","[data-testid*=\"markdown\"] h2","[data-testid*=\"markdown\"] h3","[data-testid*=\"markdown\"] p","[data-testid*=\"markdown\"] li","[data-testid*=\"markdown\"] blockquote"
+  ].join(",");
+  function looksLikeMarkdownContainer(el){
+    if(!el||!(el instanceof HTMLElement))return false;
+    var text=(el.textContent||"").trim();
+    if(text.length<20)return false;
+    if(!RTL_RE.test(text))return false; // must contain Persian/Arabic
+    return /```/.test(text)||/^#{1,6}\s+/m.test(text)||/^(\s*[-*+]\s+|\s*\d+[.)]\s+)/m.test(text);
+  }
+  function applySmartDirectionToRawMarkdownLines(root){
+    var conts=root.querySelectorAll('[class*="markdown"], [data-testid*="markdown"]');
+    for(var c=0;c<conts.length;c++){
+      var container=conts[c];
+      if(!looksLikeMarkdownContainer(container))continue;
+      var clen=container.textContent?container.textContent.length:0;
+      if(container.__srtlmdc===clen)continue; // process-once per container (gated)
+      container.__srtlmdc=clen;
+      var lines=container.querySelectorAll('[class*="line"], [data-line], .view-line');
+      var inFence=false;
+      for(var i=0;i<lines.length;i++){
+        var line=lines[i];if(!(line instanceof HTMLElement))continue;
+        var text=(line.textContent||"").trim();
+        if(!text||text.length>=1000)continue;
+        if(/^```/.test(text)){line.setAttribute("dir","ltr");line.style.setProperty("direction","ltr","important");line.style.setProperty("text-align","left","important");inFence=!inFence;continue;}
+        if(inFence){line.setAttribute("dir","ltr");line.style.setProperty("direction","ltr","important");line.style.setProperty("text-align","left","important");line.style.setProperty("unicode-bidi","normal","important");continue;}
+        var dir=detectSmartDirection(text);
+        line.setAttribute("dir",dir);
+        line.style.setProperty("direction",dir,"important");
+        line.style.setProperty("text-align",dir==="rtl"?"right":"left","important");
+        line.style.setProperty("unicode-bidi","plaintext","important");
+        line.style.setProperty("white-space","pre-wrap","important");
+        line.style.setProperty("overflow-wrap","anywhere","important");
+        line.classList.toggle("smart-md-rtl",dir==="rtl");
+        line.classList.toggle("smart-md-ltr",dir==="ltr");
+      }
+    }
+  }
+  function applySmartDirectionToMarkdown(root){
+    root=root||document;
+    try{
+      if(root.nodeType!==1&&root.nodeType!==9)return;
+      var blocks=root.querySelectorAll(MD_SEL);
+      for(var i=0;i<blocks.length;i++){
+        var el=blocks[i];
+        var key=el.textContent?el.textContent.length:0;
+        if(el.__srtlmd===key)continue;
+        el.__srtlmd=key;
+        applyDirectionToMarkdownBlock(el);
+      }
+      applySmartDirectionToRawMarkdownLines(root);
+    }catch(e){}
+  }
   function start(){
     applySmartDirectionToRenderedText(document);
     applySmartDirectionToHeaderTitles(document);
     applySmartDirectionToModals(document);
+    applySmartDirectionToMarkdown(document);
     updateComposerDirection("");
     // input + composition cover typing; keyup/beforeinput were redundant (two calls
     // per keystroke) and contributed to the typing lag.
@@ -596,6 +685,7 @@ $SMART_JS = @'
         applySmartDirectionToRenderedText(r);
         applySmartDirectionToHeaderTitles(r);
         applySmartDirectionToModals(r);
+        applySmartDirectionToMarkdown(r);
       }
       if(didWork)updateComposerDirection("");
     }
