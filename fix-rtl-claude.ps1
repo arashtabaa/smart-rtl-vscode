@@ -161,6 +161,10 @@ $SMART_JS = @'
     target.style.setProperty("overflow-wrap","anywhere","important");
     target.style.setProperty("word-break","normal","important");
     target.style.setProperty("width","auto","important");
+    // Push a shrink-wrapped flex/inline-block child to the right end (no effect on
+    // full-width blocks). Fixes headings that are RTL on mobile but left on desktop.
+    target.style.setProperty("margin-inline-start","auto","important");
+    target.style.setProperty("margin-inline-end","0","important");
     target.classList.add("smart-rtl");
   }
   var RENDERED_SEL=[
@@ -300,18 +304,22 @@ $SMART_JS = @'
     for(var i=0;i<value.length;i++){var ch=value[i];if(isRtlChar(ch))rtlCount++;else if(isLatinChar(ch))latinCount++;}
     if(rtlCount===0)return "ltr";
     if(latinCount===0)return "rtl";
+    // First strong char wins if it is Persian (after skipping leading emoji/neutrals).
     for(var p=0;p<value.length;p++){var c0=value[p];if(isRtlChar(c0))return "rtl";if(isLatinChar(c0))break;}
-    var tokens=value.split(/\s+/);
+    // English-first but mixed: decide by NON-TECHNICAL word majority, so a Persian
+    // sentence that merely starts with an English identifier (e.g. a function name
+    // followed by mostly Persian words) is still RTL, while mostly-English stays LTR.
+    var tokens=value.split(/\s+/),rtlWords=0,ltrWords=0;
     for(var j=0;j<tokens.length;j++){
       var token=normalizeToken(tokens[j]);
       if(!token)continue;
       var hasRtl=false,hasLatin=false;
-      for(var k=0;k<token.length;k++){var c=token[k];if(isRtlChar(c))hasRtl=true;if(isLatinChar(c))hasLatin=true;}
-      if(hasRtl)return "rtl";
+      for(var k=0;k<token.length;k++){var c=token[k];if(isRtlChar(c))hasRtl=true;else if(isLatinChar(c))hasLatin=true;}
+      if(hasRtl){rtlWords++;continue;}
       if(isTechnicalToken(token))continue;
-      if(hasLatin)return "ltr";
+      if(hasLatin)ltrWords++;
     }
-    return "rtl";
+    return (rtlWords>0&&rtlWords>=ltrWords)?"rtl":"ltr";
   }
   function isVisible(el){
     if(!el||!(el instanceof HTMLElement))return false;
