@@ -78,6 +78,8 @@ $SMART_JS = @'
 ;(function(){
   var RTL_RE=/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
   var LTR_RE=/[A-Za-z]/;
+  // On/off control (used by the Chrome extension toggle; always on in VSCode).
+  var _on=true,_started=false;
   // ---- Rendered conversation text: headings/titles, user prompts, assistant
   //      messages, list items, thinking/status lines. ----
   // RENDERED text uses explicit text-align:right/left (NOT start): headings often
@@ -200,6 +202,7 @@ $SMART_JS = @'
     }
   }
   function applySmartDirectionToRenderedText(root){
+    if(!_on)return;
     root=root||document;
     try{
       // The root itself (e.g. the <p>/<span> whose text just streamed in) plus
@@ -341,6 +344,7 @@ $SMART_JS = @'
     el.classList.toggle("composer-smart-ltr",dir==="ltr");
   }
   function updateComposerDirection(extraText){
+    if(!_on)return;
     var surface=findComposerEditable();
     if(!surface)return;
     var dir=detectSmartDirection(getEditableText(surface)+(extraText||""));
@@ -432,6 +436,7 @@ $SMART_JS = @'
   // Process-once + no full-document text-node walk (the old getBoundingClientRect
   // walk per text node was a big part of the hang).
   function applySmartDirectionToHeaderTitles(root){
+    if(!_on)return;
     root=root||document;
     try{
       var nodes=(root.nodeType===1||root.nodeType===9)?root.querySelectorAll(HEADER_SEL):[];
@@ -586,6 +591,7 @@ $SMART_JS = @'
     }
   }
   function applySmartDirectionToModals(root){
+    if(!_on)return;
     root=root||document;
     try{
       if(root.nodeType!==1&&root.nodeType!==9)return;
@@ -667,6 +673,7 @@ $SMART_JS = @'
     }
   }
   function applySmartDirectionToMarkdown(root){
+    if(!_on)return;
     root=root||document;
     try{
       if(root.nodeType!==1&&root.nodeType!==9)return;
@@ -751,6 +758,7 @@ $SMART_JS = @'
     try{codeEl.replaceChildren(frag);}catch(e){}
   }
   function applySmartDirectionToMarkdownCodeBlocks(root){
+    if(!_on)return;
     root=root||document;
     try{
       if(root.nodeType!==1&&root.nodeType!==9)return;
@@ -760,6 +768,7 @@ $SMART_JS = @'
     }catch(e){}
   }
   function start(){
+    if(_started)return;_started=true;
     applySmartDirectionToRenderedText(document);
     applySmartDirectionToHeaderTitles(document);
     applySmartDirectionToModals(document);
@@ -820,8 +829,38 @@ $SMART_JS = @'
       }).observe(document.body,{childList:true,subtree:true,characterData:true});
     }catch(e){}
   }
-  if(document.body)start();
-  else document.addEventListener("DOMContentLoaded",start);
+  // Live revert: strip everything this engine added (classes, inline styles, dir,
+  // process-once flags) so turning the extension OFF restores the page instantly.
+  function revertAll(){
+    try{
+      var sel=".smart-rtl,.smart-ltr,.smart-header-rtl,.smart-header-ltr,.smart-modal-rtl,.smart-modal-ltr,.smart-md-rtl,.smart-md-ltr,.smart-md-code-block,.smart-md-code-line,.composer-smart-rtl,.composer-smart-ltr";
+      var props=["direction","text-align","unicode-bidi","min-width","max-width","white-space","overflow-wrap","word-break","width","margin-inline-start","margin-inline-end","box-sizing","align-self","justify-self","overflow-x"];
+      var cls=["smart-rtl","smart-ltr","smart-header-rtl","smart-header-ltr","smart-modal-rtl","smart-modal-ltr","smart-md-rtl","smart-md-ltr","smart-md-code-block","smart-md-code-line","smart-md-code-line-rtl","smart-md-code-line-ltr","composer-smart-rtl","composer-smart-ltr"];
+      var els=document.querySelectorAll(sel);
+      for(var i=0;i<els.length;i++){
+        var el=els[i];
+        if(el.removeAttribute)el.removeAttribute("dir");
+        if(el.style)for(var p=0;p<props.length;p++)el.style.removeProperty(props[p]);
+        if(el.classList)for(var c=0;c<cls.length;c++)el.classList.remove(cls[c]);
+        if(el.removeAttribute)el.removeAttribute("data-smart-md-code");
+        try{el.__srtl=el.__srtlh=el.__srtlm=el.__srtlmd=el.__srtlL=el.__srtlmdc=undefined;}catch(e){}
+      }
+    }catch(e){}
+  }
+  // Public control, shared across this extension's content scripts (same isolated
+  // world). The popup toggle writes chrome.storage; the controller calls these.
+  window.__SMART_RTL__={
+    enable:function(){ _on=true; if(!_started)start(); else { runDirectionPasses(); updateComposerDirection(""); } },
+    disable:function(){ _on=false; revertAll(); },
+    isOn:function(){ return !!_on; }
+  };
+  // In a browser extension a controller manages on/off via chrome.storage, so do
+  // NOT auto-run there. Everywhere else (VSCode webview) run automatically.
+  var _hasExtStorage=false; try{_hasExtStorage=!!(typeof chrome!=="undefined"&&chrome.storage&&chrome.storage.local);}catch(e){}
+  if(!_hasExtStorage){
+    if(document.body)window.__SMART_RTL__.enable();
+    else document.addEventListener("DOMContentLoaded",function(){window.__SMART_RTL__.enable();});
+  }
 })();
 '@
 
