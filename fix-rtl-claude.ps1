@@ -220,7 +220,7 @@ $SMART_JS = @'
   // they wrap code/an editor (a code block must stay LTR). This is exactly why a
   // code wrapper stays left while a Persian table/box now flips to the right.
   function processWrapper(el){
-    if(!el||!(el instanceof HTMLElement)||!isVisible(el))return;
+    if(!el||!(el instanceof HTMLElement)||shouldSkipDirectionFix(el))return;
     if(el.querySelector('pre, code, kbd, samp, .cm-editor, .monaco-editor, .diff, textarea, input, [contenteditable], [role="textbox"]'))return;
     var len=el.textContent?el.textContent.length:0;
     if(el.__srtlW===len)return;
