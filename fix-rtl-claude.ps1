@@ -201,6 +201,32 @@ $SMART_JS = @'
       el.style.removeProperty("direction");el.style.removeProperty("text-align");
     }
   }
+  // Scroll wrappers (overflow-x-auto) and tables: RTL when Persian, but NEVER when
+  // they wrap code/an editor (a code block must stay LTR). This is exactly why a
+  // code wrapper stays left while a Persian table/box now flips to the right.
+  function processWrapper(el){
+    if(!el||!(el instanceof HTMLElement)||!isVisible(el))return;
+    if(el.querySelector('pre, code, kbd, samp, .cm-editor, .monaco-editor, .diff, textarea, input, [contenteditable], [role="textbox"]'))return;
+    var len=el.textContent?el.textContent.length:0;
+    if(el.__srtlW===len)return;
+    el.__srtlW=len;
+    if(len>5000)return; // not a focused box/table - avoid over-reaching
+    var txt=el.textContent||"";
+    if(!containsRtl(txt)){
+      if(el.classList.contains("smart-rtl")){
+        el.classList.remove("smart-rtl");el.removeAttribute("dir");
+        el.style.removeProperty("direction");el.style.removeProperty("text-align");el.style.removeProperty("unicode-bidi");
+      }
+      return;
+    }
+    if(detectSmartDirection(txt)==="rtl"){
+      el.setAttribute("dir","rtl");
+      el.style.setProperty("direction","rtl","important");
+      el.style.setProperty("text-align","right","important");
+      el.style.setProperty("unicode-bidi","isolate","important");
+      el.classList.add("smart-rtl");
+    }
+  }
   function applySmartDirectionToRenderedText(root){
     if(!_on)return;
     root=root||document;
@@ -213,6 +239,9 @@ $SMART_JS = @'
       if(root.nodeType===1&&(root.tagName==="UL"||root.tagName==="OL"))processList(root);
       var lists=(root.nodeType===1||root.nodeType===9)?root.querySelectorAll("ul, ol"):[];
       for(var k=0;k<lists.length;k++)processList(lists[k]);
+      if(root.nodeType===1&&(root.tagName==="TABLE"||/overflow-x/.test(root.className||"")))processWrapper(root);
+      var wraps=(root.nodeType===1||root.nodeType===9)?root.querySelectorAll('table, [class*="overflow-x"]'):[];
+      for(var w=0;w<wraps.length;w++)processWrapper(wraps[w]);
     }catch(e){}
   }
   // One coalesced pass per burst (process-once keeps document passes cheap) plus a
@@ -843,7 +872,7 @@ $SMART_JS = @'
         if(el.style)for(var p=0;p<props.length;p++)el.style.removeProperty(props[p]);
         if(el.classList)for(var c=0;c<cls.length;c++)el.classList.remove(cls[c]);
         if(el.removeAttribute)el.removeAttribute("data-smart-md-code");
-        try{el.__srtl=el.__srtlh=el.__srtlm=el.__srtlmd=el.__srtlL=el.__srtlmdc=undefined;}catch(e){}
+        try{el.__srtl=el.__srtlh=el.__srtlm=el.__srtlmd=el.__srtlL=el.__srtlmdc=el.__srtlW=undefined;}catch(e){}
       }
     }catch(e){}
   }
