@@ -91,7 +91,7 @@ $SMART_JS = @'
   function shouldSkipDirectionFix(el){
     if(!el||!(el instanceof HTMLElement))return true;
     if(!isVisible(el))return true;
-    return !!el.closest('nav, aside, [role="navigation"], [role="complementary"], pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [class*="mirror"], [class*="Mirror"], svg, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="loadingState"], [class*="empty"], [class*="pictogram"]');
+    return !!el.closest('nav, aside, [role="navigation"], [role="complementary"], [class~="fixed"], pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [class*="mirror"], [class*="Mirror"], svg, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="loadingState"], [class*="empty"], [class*="pictogram"]');
   }
   var BLOCK_TAGS={p:1,li:1,blockquote:1,h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,summary:1,figcaption:1,td:1,th:1};
   function isSafeDirectionTarget(el){
@@ -419,7 +419,7 @@ $SMART_JS = @'
   function shouldSkipHeaderTextFix(el){
     if(!el||!(el instanceof HTMLElement))return true;
     if(!isVisible(el))return true;
-    return !!el.closest('nav, aside, [role="navigation"], [role="complementary"], button, [role="button"], svg, pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="empty"], [class*="pictogram"]');
+    return !!el.closest('nav, aside, [role="navigation"], [role="complementary"], [class~="fixed"], button, [role="button"], svg, pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="empty"], [class*="pictogram"]');
   }
   function isSafeHeaderTitleTarget(el){
     if(!el||!(el instanceof HTMLElement))return false;
