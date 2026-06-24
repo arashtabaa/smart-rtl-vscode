@@ -91,7 +91,7 @@ $SMART_JS = @'
   function shouldSkipDirectionFix(el){
     if(!el||!(el instanceof HTMLElement))return true;
     if(!isVisible(el))return true;
-    return !!el.closest('pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [class*="mirror"], [class*="Mirror"], svg, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="loadingState"], [class*="empty"], [class*="pictogram"]');
+    return !!el.closest('nav, aside, [role="navigation"], [role="complementary"], [class~="fixed"], pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [class*="mirror"], [class*="Mirror"], svg, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="loadingState"], [class*="empty"], [class*="pictogram"]');
   }
   var BLOCK_TAGS={p:1,li:1,blockquote:1,h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,summary:1,figcaption:1,td:1,th:1};
   function isSafeDirectionTarget(el){
@@ -100,12 +100,12 @@ $SMART_JS = @'
     var text=(el.textContent||"").trim();
     if(!text||text.length>2500)return false;
     if(el.querySelector('pre, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor'))return false;
-    // Semantic block elements (p, li, h*, td, th…) are always safe to direct even if
-    // they contain an inline-code copy-button SVG. Only generic containers (div/span)
-    // need the spinner/button guard — directing a div that IS a toolbar/spinner row
-    // would flip the icon (the original thinking-indicator bug).
     var tag=el.tagName.toLowerCase();
-    if(BLOCK_TAGS[tag])return true;
+    // Pure content elements never appear in sidebars/toolbars with action buttons, so
+    // skip the SVG/button guard for them (fixes paragraphs with inline-code SVG icons
+    // or LaTeX SVG that were incorrectly marked unsafe). li and headings CAN appear in
+    // sidebar nav items that hold Edit/Delete buttons — they keep the guard.
+    if(tag==="p"||tag==="blockquote"||tag==="td"||tag==="th"||tag==="figcaption")return true;
     if(el.querySelector('svg, button, [role="button"], [class*="spinner"], [class*="Spinner"]'))return false;
     return true;
   }
@@ -199,6 +199,9 @@ $SMART_JS = @'
   // findBlockOwner skips lists (they have nested li), so direct them here.
   function processList(el){
     if(!el||!(el instanceof HTMLElement)||shouldSkipDirectionFix(el))return;
+    // Only style lists inside rendered message/markdown content — never sidebar
+    // conversation history lists (which would mass-flip all items RTL).
+    if(!el.closest('[data-testid*="message"],[class*="message"],[class*="Message"],.markdown,[class*="markdown"],.rendered-markdown,article'))return;
     var len=el.textContent?el.textContent.length:0;
     if(el.__srtlL===len)return;
     el.__srtlL=len;
@@ -217,7 +220,7 @@ $SMART_JS = @'
   // they wrap code/an editor (a code block must stay LTR). This is exactly why a
   // code wrapper stays left while a Persian table/box now flips to the right.
   function processWrapper(el){
-    if(!el||!(el instanceof HTMLElement)||!isVisible(el))return;
+    if(!el||!(el instanceof HTMLElement)||shouldSkipDirectionFix(el))return;
     if(el.querySelector('pre, code, kbd, samp, .cm-editor, .monaco-editor, .diff, textarea, input, [contenteditable], [role="textbox"]'))return;
     var len=el.textContent?el.textContent.length:0;
     if(el.__srtlW===len)return;
@@ -416,7 +419,7 @@ $SMART_JS = @'
   function shouldSkipHeaderTextFix(el){
     if(!el||!(el instanceof HTMLElement))return true;
     if(!isVisible(el))return true;
-    return !!el.closest('button, [role="button"], svg, pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="empty"], [class*="pictogram"]');
+    return !!el.closest('nav, aside, [role="navigation"], [role="complementary"], [class~="fixed"], button, [role="button"], svg, pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="empty"], [class*="pictogram"]');
   }
   function isSafeHeaderTitleTarget(el){
     if(!el||!(el instanceof HTMLElement))return false;
