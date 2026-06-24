@@ -93,20 +93,25 @@ $SMART_JS = @'
     if(!isVisible(el))return true;
     return !!el.closest('pre, code, kbd, samp, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, .diff, [class*="mirror"], [class*="Mirror"], svg, [role="progressbar"], [class*="spinner"], [class*="Spinner"], [class*="loading"], [class*="loadingState"], [class*="empty"], [class*="pictogram"]');
   }
+  var BLOCK_TAGS={p:1,li:1,blockquote:1,h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,summary:1,figcaption:1,td:1,th:1};
   function isSafeDirectionTarget(el){
     if(!el||!(el instanceof HTMLElement))return false;
     if(shouldSkipDirectionFix(el))return false;
     var text=(el.textContent||"").trim();
     if(!text||text.length>2500)return false;
-    // A row that contains a spinner/icon/button is a status/toolbar row, not a pure
-    // text block - directing it flips the icon/spinner (the thinking indicator bug).
-    if(el.querySelector('pre, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor, svg, button, [role="button"], [class*="spinner"], [class*="Spinner"]'))return false;
+    if(el.querySelector('pre, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor'))return false;
+    // Semantic block elements (p, li, h*, td, th…) are always safe to direct even if
+    // they contain an inline-code copy-button SVG. Only generic containers (div/span)
+    // need the spinner/button guard — directing a div that IS a toolbar/spinner row
+    // would flip the icon (the original thinking-indicator bug).
+    var tag=el.tagName.toLowerCase();
+    if(BLOCK_TAGS[tag])return true;
+    if(el.querySelector('svg, button, [role="button"], [class*="spinner"], [class*="Spinner"]'))return false;
     return true;
   }
   function findNearestMessageRoot(el){
     return el.closest('[data-testid*="message"], [class*="message"], [class*="Message"], [data-testid*="assistant"], [class*="assistant"], [data-testid*="user"], [class*="user"], [class*="progressContent"], [class*="loadingState"]')||el.closest("main, article, section")||document.body;
   }
-  var BLOCK_TAGS={p:1,li:1,blockquote:1,h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,summary:1,figcaption:1};
   // Walk up from a Persian run to the nearest safe block-level owner so direction
   // lands on the element that owns the line layout (not an inner span).
   function findBlockOwner(el){
@@ -146,6 +151,8 @@ $SMART_JS = @'
         target.style.removeProperty("direction");
         target.style.removeProperty("text-align");
         target.style.removeProperty("width");
+        target.style.removeProperty("margin-left");
+        target.style.removeProperty("margin-right");
       }
       return;
     }
@@ -162,9 +169,10 @@ $SMART_JS = @'
     target.style.setProperty("word-break","normal","important");
     target.style.setProperty("width","auto","important");
     // Push a shrink-wrapped flex/inline-block child to the right end (no effect on
-    // full-width blocks). Fixes headings that are RTL on mobile but left on desktop.
-    target.style.setProperty("margin-inline-start","auto","important");
-    target.style.setProperty("margin-inline-end","0","important");
+    // full-width blocks). Use PHYSICAL margins so direction:rtl on the element itself
+    // does not flip the logical inline-start/end mapping.
+    target.style.setProperty("margin-left","auto","important");
+    target.style.setProperty("margin-right","0","important");
     target.classList.add("smart-rtl");
   }
   var RENDERED_SEL=[
@@ -445,8 +453,8 @@ $SMART_JS = @'
         target.removeAttribute("dir");
         target.style.removeProperty("direction");
         target.style.removeProperty("text-align");
-        target.style.removeProperty("margin-inline-start");
-        target.style.removeProperty("margin-inline-end");
+        target.style.removeProperty("margin-left");
+        target.style.removeProperty("margin-right");
       }
       return;
     }
@@ -456,8 +464,9 @@ $SMART_JS = @'
     target.style.setProperty("unicode-bidi","isolate","important");
     target.classList.add("smart-header-rtl");
     // Shift only the title text within its flex/grid row (toolbar buttons stay).
-    target.style.setProperty("margin-inline-start","auto","important");
-    target.style.setProperty("margin-inline-end","0","important");
+    // Use PHYSICAL margins so direction:rtl on the element does not flip them.
+    target.style.setProperty("margin-left","auto","important");
+    target.style.setProperty("margin-right","0","important");
     // Bounded width (room for toolbar buttons) + wrap so long titles never clip.
     target.style.setProperty("box-sizing","border-box","important");
     target.style.setProperty("max-width","calc(100% - 96px)","important");
@@ -871,7 +880,7 @@ $SMART_JS = @'
   function revertAll(){
     try{
       var sel=".smart-rtl,.smart-ltr,.smart-header-rtl,.smart-header-ltr,.smart-modal-rtl,.smart-modal-ltr,.smart-md-rtl,.smart-md-ltr,.smart-md-code-block,.smart-md-code-line,.composer-smart-rtl,.composer-smart-ltr";
-      var props=["direction","text-align","unicode-bidi","min-width","max-width","white-space","overflow-wrap","word-break","width","margin-inline-start","margin-inline-end","box-sizing","align-self","justify-self","overflow-x"];
+      var props=["direction","text-align","unicode-bidi","min-width","max-width","white-space","overflow-wrap","word-break","width","margin-left","margin-right","margin-inline-start","margin-inline-end","box-sizing","align-self","justify-self","overflow-x"];
       var cls=["smart-rtl","smart-ltr","smart-header-rtl","smart-header-ltr","smart-modal-rtl","smart-modal-ltr","smart-md-rtl","smart-md-ltr","smart-md-code-block","smart-md-code-line","smart-md-code-line-rtl","smart-md-code-line-ltr","composer-smart-rtl","composer-smart-ltr"];
       var els=document.querySelectorAll(sel);
       for(var i=0;i<els.length;i++){
