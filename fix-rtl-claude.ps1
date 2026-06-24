@@ -40,10 +40,10 @@ pre,code,kbd,samp,.cm-editor,.monaco-editor{font-family:"SF Mono",Monaco,Consola
 # the smart classes. The broad "form:has(...) *" descendant rule is gone so it
 # no longer overrides RTL on the typed Persian text.
 $SMART_CSS_CORE = @'
-.smart-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important}
-.smart-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important}
-.smart-header-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important}
-.smart-header-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important}
+.smart-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:isolate !important}
+.smart-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:isolate !important}
+.smart-header-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:isolate !important}
+.smart-header-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:isolate !important}
 button,[role="button"],svg{unicode-bidi:normal}
 /* Wrap smart-directed rendered text inside the visible area; never clip/overflow */
 .smart-rtl,.smart-ltr,.smart-header-rtl,.smart-header-ltr{box-sizing:border-box !important;max-width:100% !important;min-width:0 !important;white-space:normal !important;overflow-wrap:anywhere !important;word-break:normal !important;flex-shrink:1 !important}
@@ -53,17 +53,17 @@ button,[role="button"],svg{unicode-bidi:normal}
 /* Let the nearest message/status text container shrink and wrap in flex rows */
 [class*="message"],[data-testid*="message"],[class*="thinking"],[data-testid*="thinking"],[class*="status"],[data-testid*="status"]{min-width:0 !important;max-width:100% !important}
 /* Question / choice modals & dialogs */
-.smart-modal-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
-.smart-modal-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
+.smart-modal-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:isolate !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
+.smart-modal-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:isolate !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
 button:has(svg):not(.smart-modal-rtl):not(.smart-modal-ltr){direction:ltr !important;text-align:center !important}
 /* Markdown content (rendered + raw source lines) */
-.smart-md-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
-.smart-md-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:plaintext !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
+.smart-md-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:isolate !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
+.smart-md-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:isolate !important;min-width:0 !important;max-width:100% !important;white-space:normal !important;overflow-wrap:anywhere !important}
 .markdown pre,.markdown pre *,[class*="markdown"] pre,[class*="markdown"] pre *,.smart-md-rtl pre,.smart-md-rtl pre *,.smart-md-ltr pre,.smart-md-ltr pre *{direction:ltr !important;text-align:left !important;unicode-bidi:normal !important;white-space:pre !important;overflow-wrap:normal !important}
 /* Markdown shown inside a pre/code block, split into per-line spans */
 .smart-md-code-block{display:block !important;direction:ltr !important;text-align:left !important;unicode-bidi:normal !important;white-space:pre-wrap !important;max-width:100% !important;min-width:0 !important;overflow-x:auto !important}
 .smart-md-code-line{display:block !important;box-sizing:border-box !important;width:100% !important;max-width:100% !important;min-width:0 !important}
-.smart-md-code-line-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:plaintext !important;white-space:pre-wrap !important;overflow-wrap:anywhere !important}
+.smart-md-code-line-rtl{direction:rtl !important;text-align:right !important;unicode-bidi:isolate !important;white-space:pre-wrap !important;overflow-wrap:anywhere !important}
 .smart-md-code-line-ltr{direction:ltr !important;text-align:left !important;unicode-bidi:normal !important;white-space:pre-wrap !important;overflow-wrap:normal !important}
 .composer-smart-rtl{direction:rtl !important;text-align:start !important;unicode-bidi:plaintext !important}
 .composer-smart-ltr{direction:ltr !important;text-align:start !important;unicode-bidi:plaintext !important}
@@ -150,7 +150,7 @@ $SMART_JS = @'
     target.setAttribute("dir","rtl");
     target.style.setProperty("direction","rtl","important");
     target.style.setProperty("text-align","right","important");
-    target.style.setProperty("unicode-bidi","plaintext","important");
+    target.style.setProperty("unicode-bidi","isolate","important");
     // Wrap inside the visible area; never stretch past it (fixes RTL overflow).
     target.style.setProperty("box-sizing","border-box","important");
     target.style.setProperty("max-width","100%","important");
@@ -412,7 +412,7 @@ $SMART_JS = @'
     target.setAttribute("dir","rtl");
     target.style.setProperty("direction","rtl","important");
     target.style.setProperty("text-align","right","important");
-    target.style.setProperty("unicode-bidi","plaintext","important");
+    target.style.setProperty("unicode-bidi","isolate","important");
     target.classList.add("smart-header-rtl");
     // Shift only the title text within its flex/grid row (toolbar buttons stay).
     target.style.setProperty("margin-inline-start","auto","important");
@@ -554,7 +554,7 @@ $SMART_JS = @'
     target.setAttribute("dir","rtl");
     target.style.setProperty("direction","rtl","important");
     target.style.setProperty("text-align","right","important");
-    target.style.setProperty("unicode-bidi","plaintext","important");
+    target.style.setProperty("unicode-bidi","isolate","important");
     target.style.setProperty("min-width","0","important");
     target.style.setProperty("max-width","100%","important");
     target.style.setProperty("white-space","normal","important");
@@ -619,7 +619,7 @@ $SMART_JS = @'
     el.setAttribute("dir","rtl");
     el.style.setProperty("direction","rtl","important");
     el.style.setProperty("text-align","right","important");
-    el.style.setProperty("unicode-bidi","plaintext","important");
+    el.style.setProperty("unicode-bidi","isolate","important");
     el.style.setProperty("min-width","0","important");
     el.style.setProperty("max-width","100%","important");
     el.style.setProperty("white-space","normal","important");
@@ -658,7 +658,7 @@ $SMART_JS = @'
         line.setAttribute("dir",dir);
         line.style.setProperty("direction",dir,"important");
         line.style.setProperty("text-align",dir==="rtl"?"right":"left","important");
-        line.style.setProperty("unicode-bidi","plaintext","important");
+        line.style.setProperty("unicode-bidi","isolate","important");
         line.style.setProperty("white-space","pre-wrap","important");
         line.style.setProperty("overflow-wrap","anywhere","important");
         line.classList.toggle("smart-md-rtl",dir==="rtl");
@@ -718,7 +718,7 @@ $SMART_JS = @'
     line.classList.add(dir==="rtl"?"smart-md-code-line-rtl":"smart-md-code-line-ltr");
     line.style.setProperty("direction",dir,"important");
     line.style.setProperty("text-align",dir==="rtl"?"right":"left","important");
-    line.style.setProperty("unicode-bidi","plaintext","important");
+    line.style.setProperty("unicode-bidi","isolate","important");
     line.style.setProperty("white-space","pre-wrap","important");
     line.style.setProperty("overflow-wrap","anywhere","important");
     return line;
