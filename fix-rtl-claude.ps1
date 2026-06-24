@@ -100,12 +100,12 @@ $SMART_JS = @'
     var text=(el.textContent||"").trim();
     if(!text||text.length>2500)return false;
     if(el.querySelector('pre, textarea, input, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], .cm-editor, .monaco-editor'))return false;
-    // Semantic block elements (p, li, h*, td, th…) are always safe to direct even if
-    // they contain an inline-code copy-button SVG. Only generic containers (div/span)
-    // need the spinner/button guard — directing a div that IS a toolbar/spinner row
-    // would flip the icon (the original thinking-indicator bug).
     var tag=el.tagName.toLowerCase();
-    if(BLOCK_TAGS[tag])return true;
+    // Pure content elements never appear in sidebars/toolbars with action buttons, so
+    // skip the SVG/button guard for them (fixes paragraphs with inline-code SVG icons
+    // or LaTeX SVG that were incorrectly marked unsafe). li and headings CAN appear in
+    // sidebar nav items that hold Edit/Delete buttons — they keep the guard.
+    if(tag==="p"||tag==="blockquote"||tag==="td"||tag==="th"||tag==="figcaption")return true;
     if(el.querySelector('svg, button, [role="button"], [class*="spinner"], [class*="Spinner"]'))return false;
     return true;
   }
