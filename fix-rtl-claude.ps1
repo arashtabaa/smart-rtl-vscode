@@ -180,6 +180,25 @@ $SMART_JS = @'
     var t=findBlockOwner(el);
     if(t)applyRenderedDirectionToTarget(t);
   }
+  // A <ul>/<ol> wrapper must itself be RTL for Persian lists, so the bullets /
+  // numbers and indentation move to the right (the LI text is handled separately).
+  // findBlockOwner skips lists (they have nested li), so direct them here.
+  function processList(el){
+    if(!el||!(el instanceof HTMLElement)||shouldSkipDirectionFix(el))return;
+    var len=el.textContent?el.textContent.length:0;
+    if(el.__srtlL===len)return;
+    el.__srtlL=len;
+    var dir=detectSmartDirection(el.textContent||"");
+    if(dir==="rtl"){
+      el.setAttribute("dir","rtl");
+      el.style.setProperty("direction","rtl","important");
+      el.style.setProperty("text-align","right","important");
+      el.classList.add("smart-rtl");
+    }else if(el.classList.contains("smart-rtl")){
+      el.classList.remove("smart-rtl");el.removeAttribute("dir");
+      el.style.removeProperty("direction");el.style.removeProperty("text-align");
+    }
+  }
   function applySmartDirectionToRenderedText(root){
     root=root||document;
     try{
@@ -188,6 +207,9 @@ $SMART_JS = @'
       if(root.nodeType===1)processRendered(root);
       var nodes=(root.nodeType===1||root.nodeType===9)?root.querySelectorAll(RENDERED_SEL):[];
       for(var i=0;i<nodes.length;i++)processRendered(nodes[i]);
+      if(root.nodeType===1&&(root.tagName==="UL"||root.tagName==="OL"))processList(root);
+      var lists=(root.nodeType===1||root.nodeType===9)?root.querySelectorAll("ul, ol"):[];
+      for(var k=0;k<lists.length;k++)processList(lists[k]);
     }catch(e){}
   }
   // One coalesced pass per burst (process-once keeps document passes cheap) plus a
